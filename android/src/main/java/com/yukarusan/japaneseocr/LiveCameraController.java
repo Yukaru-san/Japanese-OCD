@@ -12,6 +12,7 @@ import android.webkit.WebView;
 import android.widget.ImageView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
@@ -24,6 +25,7 @@ import androidx.camera.core.resolutionselector.ResolutionSelector;
 import androidx.camera.core.resolutionselector.ResolutionStrategy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
+import androidx.camera.view.TransformExperimental;
 import androidx.camera.view.transform.OutputTransform;
 import androidx.core.content.ContextCompat;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -36,6 +38,7 @@ import java.util.concurrent.Executors;
  * Shows the camera preview behind the WebView, feeds frames to the recognizer and captures
  * full-resolution photos. All public methods must be called on the main thread.
  */
+@OptIn(markerClass = TransformExperimental.class)
 class LiveCameraController {
 
     interface FrameListener {
