@@ -8,13 +8,13 @@ import type { PermissionState, PluginListenerHandle } from '@capacitor/core';
 export type JapaneseOcrErrorCode =
   /** The platform or device does not support this feature (web, iOS, no camera, ...). */
   | 'UNAVAILABLE'
-  /** The text recognizer is not initialised yet. Check `isOcrReady()`. */
+  /** The Japanese text recognizer failed to load on this device. Not recoverable by retrying. */
   | 'NOT_READY'
   /** The camera permission was denied. */
   | 'PERMISSION_DENIED'
   /** The camera could not be opened or a capture failed. */
   | 'CAMERA_ERROR'
-  /** `startLiveRecognition()` is already running. */
+  /** `startLiveRecognition()` is already running, or a `captureFrame()` is still in progress. */
   | 'ALREADY_RUNNING'
   /** The call needs a running live recognition (e.g. `captureFrame()`). */
   | 'NOT_RUNNING'
@@ -81,6 +81,9 @@ export interface OcrGeometry {
   viewBoundingBox?: Rect;
   viewCornerPoints?: Point[];
 }
+
+// `viewBoundingBox` can also be missing on live results for the first frames, before the preview
+// has been laid out on screen.
 
 /** A single character. */
 export interface OcrSymbol extends OcrGeometry {
@@ -215,9 +218,16 @@ export interface LiveState {
   translation: TranslationOptions;
 }
 
-export interface LiveRecognitionErrorEvent {
-  code: JapaneseOcrErrorCode;
-  message: string;
+/** Payload of the `liveRecognitionError` event. Same shape as a thrown `JapaneseOcrError`. */
+export type LiveRecognitionErrorEvent = JapaneseOcrError;
+
+export interface TranslationReadyOptions {
+  /**
+   * BCP-47 code of the target language.
+   *
+   * @default 'en'
+   */
+  targetLanguage?: string;
 }
 
 export interface JapaneseOcrPlugin {
@@ -286,7 +296,7 @@ export interface JapaneseOcrPlugin {
   /**
    * Checks whether the Japanese → target language model is downloaded. Never throws.
    */
-  isTranslationReady(options?: { targetLanguage?: string }): Promise<{ ready: boolean }>;
+  isTranslationReady(options?: TranslationReadyOptions): Promise<{ ready: boolean }>;
 
   /**
    * Translates Japanese text on the device.
@@ -294,7 +304,8 @@ export interface JapaneseOcrPlugin {
   translateText(options: TranslateTextOptions): Promise<{ text: string; targetLanguage: string }>;
 
   /**
-   * Fired for every recognized live frame.
+   * Fired for every analyzed live frame, also with an empty result (`text: ''`, no blocks) when no
+   * text is visible. Paused while the preview is frozen by `captureFrame()`.
    */
   addListener(eventName: 'textRecognized', listenerFunc: (result: OcrResult) => void): Promise<PluginListenerHandle>;
 
