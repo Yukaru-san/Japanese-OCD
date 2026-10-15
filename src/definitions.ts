@@ -27,6 +27,14 @@ export type JapaneseOcrErrorCode =
   /** Translating the recognized text failed. */
   | 'TRANSLATION_FAILED';
 
+/**
+ * Shape of every error the plugin rejects with. Narrow a caught value with `isJapaneseOcrError()`.
+ */
+export interface JapaneseOcrError {
+  code: JapaneseOcrErrorCode;
+  message: string;
+}
+
 export interface DeviceSupportResult {
   /** `true` when Japanese text recognition is available on this device. */
   supported: boolean;

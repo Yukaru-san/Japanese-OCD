@@ -168,6 +168,25 @@ class LiveCameraController {
             new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         );
         webView.setBackgroundColor(Color.TRANSPARENT);
+        setPageLive(true);
+    }
+
+    /**
+     * Toggles the `japanese-ocr-live` class on the page's root element. While it is set, an
+     * injected style makes html and body transparent so the preview behind the WebView shows.
+     */
+    private void setPageLive(boolean live) {
+        webView.evaluateJavascript(
+            "(function(on){var d=document.documentElement;" +
+                "if(!document.getElementById('japanese-ocr-live-style')){var s=document.createElement('style');" +
+                "s.id='japanese-ocr-live-style';" +
+                "s.textContent='html.japanese-ocr-live,html.japanese-ocr-live body{background:transparent!important}';" +
+                "document.head.appendChild(s);}" +
+                "d.classList.toggle('japanese-ocr-live',on);})(" +
+                live +
+                ");",
+            null
+        );
     }
 
     @SuppressLint("UnsafeOptInUsageError")
@@ -325,6 +344,7 @@ class LiveCameraController {
             parent.removeView(previewView);
             previewView = null;
             webView.setBackgroundColor(Color.WHITE);
+            setPageLive(false);
         }
         if (analysisExecutor != null) {
             analysisExecutor.shutdown();
