@@ -48,6 +48,8 @@ function showResult(result: OcrResult & { imagePath?: string }): void {
   resultTranslation.value = result.translatedText ?? '';
   $('json').textContent = JSON.stringify(result, null, 2);
   const words = findWords(result).map((m) => `${m.word} = ${m.entry.meaning}`);
+  const readings = (result.furigana ?? []).map((f) => (f.base ? `${f.base} = ${f.text}` : f.text));
+  $('result-furigana').textContent = readings.length ? `Furigana: ${[...new Set(readings)].join(', ')}` : '';
   $('result-words').textContent = words.length ? `Glossar: ${[...new Set(words)].join(', ')}` : '';
   if (result.imagePath) {
     capturedImage.src = Capacitor.convertFileSrc(result.imagePath);

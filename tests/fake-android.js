@@ -15,6 +15,7 @@
   const SCALE = 3; // image px per CSS px
   const TRANSLATIONS = { en: ['Hello, world', 'Study Japanese'], de: ['Hallo, Welt', 'Japanisch lernen'] };
 
+  const left2 = () => LINES[1][1];
   const rect = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b });
   const corners = (b) => [
     { x: b.left, y: b.top },
@@ -54,7 +55,9 @@
       if (target) block.translatedText = TRANSLATIONS[target][i];
       return block;
     });
-    const result = { text: blocks.map((b) => b.text).join('\n'), blocks, imageWidth: 1170, imageHeight: 2532 };
+    const furigana = [{ text: 'にほんご', base: '日本語', ...geometry(rect(left2(), 210, left2() + 3 * CHAR, 226)) }];
+    if (!withView) furigana.forEach((f) => { delete f.viewBoundingBox; delete f.viewCornerPoints; });
+    const result = { text: blocks.map((b) => b.text).join('\n'), blocks, furigana, vertical: false, imageWidth: 1170, imageHeight: 2532 };
     if (target) {
       result.translatedText = blocks.map((b) => b.translatedText).join('\n');
       result.targetLanguage = target;
