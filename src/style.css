@@ -1,0 +1,186 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  --bg: #fafafa;
+  --fg: #1b1b1b;
+  --muted: #666;
+  --accent: #c2410c;
+  --panel: #fff;
+  --border: #ddd;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --fg: #eee;
+    --muted: #aaa;
+    --panel: #1e1e1e;
+    --border: #333;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+}
+
+/* While the camera runs, the preview is drawn behind the WebView. */
+body.live {
+  background: transparent;
+}
+
+body.live #panels {
+  display: none;
+}
+
+h1 {
+  font-size: 1.4rem;
+}
+
+h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+button,
+select {
+  font: inherit;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  margin-bottom: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+img {
+  max-width: 100%;
+  margin-bottom: 8px;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  max-height: 240px;
+  overflow: auto;
+}
+
+#live-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+}
+
+#live-text {
+  font-size: 1.1rem;
+  white-space: pre-wrap;
+  max-height: 30vh;
+  overflow: auto;
+  margin-bottom: 4px;
+}
+
+#live-translation {
+  color: #fdba74;
+  white-space: pre-wrap;
+  max-height: 20vh;
+  overflow: auto;
+  margin-bottom: 8px;
+}
+
+#word-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.word-marker {
+  position: absolute;
+  pointer-events: auto;
+  padding: 0;
+  background: rgba(250, 204, 21, 0.25);
+  border: 2px solid #facc15;
+  border-radius: 4px;
+}
+
+#word-popup {
+  position: fixed;
+  width: 240px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  background: #fffbeb;
+  color: #1b1b1b;
+  border: 1px solid #facc15;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+#word-popup .meaning {
+  font-size: 1.1rem;
+  margin: 4px 0;
+}
+
+#word-popup .note {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+#live-words,
+#result-words {
+  color: #facc15;
+  margin-bottom: 4px;
+}

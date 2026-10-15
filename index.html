@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>JP OCR Test</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main id="panels">
+      <h1>JP OCR Test</h1>
+
+      <section>
+        <h2>Status</h2>
+        <dl>
+          <dt>isDeviceSupported</dt>
+          <dd id="supported">…</dd>
+          <dt>isOcrReady</dt>
+          <dd id="ready">…</dd>
+          <dt>Kamera-Berechtigung</dt>
+          <dd id="permission">…</dd>
+          <dt>Übersetzungsmodell</dt>
+          <dd id="translation-ready">…</dd>
+        </dl>
+        <div class="row">
+          <button id="refresh">Aktualisieren</button>
+          <button id="request-permission">Berechtigung anfragen</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Übersetzung</h2>
+        <label class="row">
+          <input type="checkbox" id="translate" />
+          Übersetzen nach
+          <select id="language">
+            <option value="de">Deutsch</option>
+            <option value="en">Englisch</option>
+          </select>
+        </label>
+        <div class="row">
+          <button id="prepare-translation">Modell laden</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Live-Kamera</h2>
+        <div class="row">
+          <button id="start" class="primary">Live starten</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Bild erkennen</h2>
+        <div class="row">
+          <button id="gallery" class="primary">Aus Galerie wählen</button>
+          <input type="file" id="file" accept="image/*" />
+        </div>
+      </section>
+
+      <section>
+        <h2>Ergebnis</h2>
+        <textarea id="result" rows="6" placeholder="Erkannter Text"></textarea>
+        <textarea id="result-translation" rows="4" placeholder="Übersetzung"></textarea>
+        <img id="captured-image" alt="" hidden />
+        <div id="result-words"></div>
+        <div class="row">
+          <button id="copy">Text kopieren</button>
+          <button id="copy-translation">Übersetzung kopieren</button>
+          <button id="translate-result">Text übersetzen</button>
+        </div>
+        <details>
+          <summary>JSON</summary>
+          <pre id="json"></pre>
+        </details>
+      </section>
+
+      <section>
+        <h2>Log</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <div id="word-layer"></div>
+    <div id="word-popup" hidden></div>
+
+    <div id="live-overlay" hidden>
+      <div id="live-words"></div>
+      <div id="live-text"></div>
+      <div id="live-translation"></div>
+      <div class="row">
+        <button id="capture" class="primary">Festhalten</button>
+        <button id="resume" hidden>Weiter</button>
+        <button id="torch">Licht</button>
+        <button id="live-translate">Übersetzung an</button>
+        <button id="stop">Stopp</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
