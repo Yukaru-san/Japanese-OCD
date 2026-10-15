@@ -51,11 +51,14 @@
       const g = geometry(rect(left, top, left + chars.length * CHAR, top + CHAR));
       if (!withView) { delete g.viewBoundingBox; delete g.viewCornerPoints; }
       const line = { text, confidence: 0.92, recognizedLanguage: 'ja', elements, ...g };
-      const block = { text, recognizedLanguage: 'ja', lines: [line], ...g };
+      const segments = text.startsWith('日本語')
+        ? [{ text: '日本語', reading: 'にほんご' }, { text: text.slice(3) }]
+        : [{ text }];
+      const block = { text, recognizedLanguage: 'ja', lines: [line], segments, ...g };
       if (target) block.translatedText = TRANSLATIONS[target][i];
       return block;
     });
-    const furigana = [{ text: 'にほんご', base: '日本語', ...geometry(rect(left2(), 210, left2() + 3 * CHAR, 226)) }];
+    const furigana = [{ text: 'にほんご', base: '日本語', block: 1, start: 0, end: 3, ...geometry(rect(left2(), 210, left2() + 3 * CHAR, 226)) }];
     if (!withView) furigana.forEach((f) => { delete f.viewBoundingBox; delete f.viewCornerPoints; });
     const result = { text: blocks.map((b) => b.text).join('\n'), blocks, furigana, vertical: false, imageWidth: 1170, imageHeight: 2532 };
     if (target) {
@@ -125,6 +128,7 @@
       return r;
     },
     recognizeFromGallery: (o) => {
+      state.lastGallery = o;
       if (state.pickerCancels) throw reject('No image was selected.', 'CANCELLED');
       const saved = state.translation;
       state.translation = o.translation && o.translation.enabled ? (o.translation.targetLanguage || 'en') : null;

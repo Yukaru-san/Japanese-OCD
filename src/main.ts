@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
-import { JapaneseOcr } from 'capacitor-japanese-ocr';
+import { JapaneseOcr, toRubyHtml } from 'capacitor-japanese-ocr';
 import type { OcrResult, TranslationOptions } from 'capacitor-japanese-ocr';
 
 import { WordOverlay, findWords } from './overlay';
@@ -27,6 +27,10 @@ function log(message: string, error?: unknown): void {
   logEl.textContent = `${line}\n${logEl.textContent ?? ''}`;
 }
 
+function selectRegion(): boolean {
+  return $<HTMLInputElement>('select-region').checked;
+}
+
 function translation(): TranslationOptions {
   return { enabled: translateBox.checked, targetLanguage: languageSelect.value };
 }
@@ -47,6 +51,8 @@ function showResult(result: OcrResult & { imagePath?: string }): void {
   resultText.value = result.text;
   resultTranslation.value = result.translatedText ?? '';
   $('json').textContent = JSON.stringify(result, null, 2);
+  // Text with its furigana as <ruby>; toRubyHtml escapes the text.
+  $('result-ruby').innerHTML = result.furigana?.length ? toRubyHtml(result) : '';
   const words = findWords(result).map((m) => `${m.word} = ${m.entry.meaning}`);
   const readings = (result.furigana ?? []).map((f) => (f.base ? `${f.base} = ${f.text}` : f.text));
   $('result-furigana').textContent = readings.length ? `Furigana: ${[...new Set(readings)].join(', ')}` : '';
@@ -147,18 +153,24 @@ async function recognizeFile(file: File): Promise<void> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
-  const result = await run('recognizeImage', () => JapaneseOcr.recognizeImage({ base64, translation: translation() }));
-  if (result) showResult(result);
+  try {
+    const result = await JapaneseOcr.recognizeImage({ base64, translation: translation(), selectRegion: selectRegion() });
+    showResult(result);
+    log('recognizeImage ok');
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    log(code === 'CANCELLED' ? 'Auswahl abgebrochen' : 'recognizeImage', code === 'CANCELLED' ? undefined : error);
+  }
 }
 
 async function recognizeGallery(): Promise<void> {
   try {
-    const result = await JapaneseOcr.recognizeFromGallery({ translation: translation() });
+    const result = await JapaneseOcr.recognizeFromGallery({ translation: translation(), selectRegion: selectRegion() });
     showResult(result);
     log('recognizeFromGallery ok');
   } catch (error) {
     const code = (error as { code?: string }).code;
-    log(code === 'CANCELLED' ? 'Galerie: keine Auswahl' : 'recognizeFromGallery', code === 'CANCELLED' ? undefined : error);
+    log(code === 'CANCELLED' ? 'Galerie: keine Auswahl oder abgebrochen' : 'recognizeFromGallery', code === 'CANCELLED' ? undefined : error);
   }
 }
 

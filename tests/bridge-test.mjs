@@ -126,6 +126,8 @@ const browser = await chromium.launch();
   check('gallery image text reaches the web app', (await page.inputValue('#result')) === 'こんにちは、せかい\n日本語を勉強する');
   check('gallery result lists glossary words', (await page.textContent('#result-words')).includes('せかい = Welt'));
   check('furigana listed separately from the text', (await page.textContent('#result-furigana')) === 'Furigana: 日本語 = にほんご' && !(await page.inputValue('#result')).includes('にほんご'));
+  check('gallery asks for the selection screen', (await page.evaluate(() => window.__fakeAndroid.lastGallery?.selectRegion)) === true);
+  check('text is shown with furigana as ruby', (await page.innerHTML('#result-ruby')).includes('<ruby>日本語<rt>にほんご</rt></ruby>を勉強する'));
   check('gallery photo is shown', await page.evaluate(() => !document.getElementById('captured-image').hidden && document.getElementById('captured-image').src.includes('_capacitor_content_')));
   await page.evaluate(() => { window.__fakeAndroid.pickerCancels = true; });
   await page.click('#gallery');
