@@ -54,7 +54,7 @@ Errors are `CapacitorException`s; check `error.code` against `JapaneseOcrErrorCo
 - The Japanese recognition model is bundled into the app (adds a few MB per ABI); no download, no Play Services needed.
 - Translation models (~30 MB per language) are downloaded on demand by `prepareTranslation()`.
 - Versions can be overridden in the app's `variables.gradle`: `cameraxVersion`, `mlkitTextRecognitionJapaneseVersion`, `mlkitTranslateVersion`.
-- Bounding boxes refer to the upright image (`imageWidth` × `imageHeight`), not to screen pixels.
+- `boundingBox`/`cornerPoints` refer to the upright image (`imageWidth` × `imageHeight`). Live and capture results also carry `viewBoundingBox`/`viewCornerPoints` in CSS pixels of the WebView, down to single characters (`symbols`), so the page can draw its own overlays on recognized words.
 
 ## API
 
@@ -450,54 +450,41 @@ removeAllListeners() => any
 
 #### OcrBlock
 
-| Prop                     | Type                                  | Description                                                      |
-| ------------------------ | ------------------------------------- | ---------------------------------------------------------------- |
-| **`text`**               | <code>string</code>                   |                                                                  |
-| **`translatedText`**     | <code>string</code>                   | Translation of this block. Only set when translation is enabled. |
-| **`boundingBox`**        | <code><a href="#rect">Rect</a></code> |                                                                  |
-| **`cornerPoints`**       | <code>{}</code>                       |                                                                  |
-| **`recognizedLanguage`** | <code>string</code>                   |                                                                  |
-| **`lines`**              | <code>{}</code>                       |                                                                  |
-
-
-#### Rect
-
-| Prop         | Type                |
-| ------------ | ------------------- |
-| **`left`**   | <code>number</code> |
-| **`top`**    | <code>number</code> |
-| **`right`**  | <code>number</code> |
-| **`bottom`** | <code>number</code> |
-
-
-#### Point
-
-| Prop    | Type                |
-| ------- | ------------------- |
-| **`x`** | <code>number</code> |
-| **`y`** | <code>number</code> |
+| Prop                     | Type                | Description                                                      |
+| ------------------------ | ------------------- | ---------------------------------------------------------------- |
+| **`text`**               | <code>string</code> |                                                                  |
+| **`translatedText`**     | <code>string</code> | Translation of this block. Only set when translation is enabled. |
+| **`recognizedLanguage`** | <code>string</code> |                                                                  |
+| **`lines`**              | <code>{}</code>     |                                                                  |
 
 
 #### OcrLine
 
-| Prop                     | Type                                  | Description      |
-| ------------------------ | ------------------------------------- | ---------------- |
-| **`text`**               | <code>string</code>                   |                  |
-| **`boundingBox`**        | <code><a href="#rect">Rect</a></code> |                  |
-| **`cornerPoints`**       | <code>{}</code>                       |                  |
-| **`confidence`**         | <code>number</code>                   | Between 0 and 1. |
-| **`recognizedLanguage`** | <code>string</code>                   |                  |
-| **`elements`**           | <code>{}</code>                       |                  |
+| Prop                     | Type                | Description      |
+| ------------------------ | ------------------- | ---------------- |
+| **`text`**               | <code>string</code> |                  |
+| **`confidence`**         | <code>number</code> | Between 0 and 1. |
+| **`recognizedLanguage`** | <code>string</code> |                  |
+| **`elements`**           | <code>{}</code>     |                  |
 
 
 #### OcrElement
 
-| Prop               | Type                                  | Description      |
-| ------------------ | ------------------------------------- | ---------------- |
-| **`text`**         | <code>string</code>                   |                  |
-| **`boundingBox`**  | <code><a href="#rect">Rect</a></code> |                  |
-| **`cornerPoints`** | <code>{}</code>                       |                  |
-| **`confidence`**   | <code>number</code>                   | Between 0 and 1. |
+| Prop             | Type                | Description      |
+| ---------------- | ------------------- | ---------------- |
+| **`text`**       | <code>string</code> |                  |
+| **`confidence`** | <code>number</code> | Between 0 and 1. |
+| **`symbols`**    | <code>{}</code>     |                  |
+
+
+#### OcrSymbol
+
+A single character.
+
+| Prop             | Type                | Description      |
+| ---------------- | ------------------- | ---------------- |
+| **`text`**       | <code>string</code> |                  |
+| **`confidence`** | <code>number</code> | Between 0 and 1. |
 
 
 #### PrepareTranslationOptions

@@ -94,7 +94,8 @@ class OcrEngine {
         int imageWidth,
         int imageHeight,
         @Nullable List<String> translations,
-        @Nullable String targetLanguage
+        @Nullable String targetLanguage,
+        @Nullable ViewMapper view
     ) {
         JSArray blocks = new JSArray();
         StringBuilder allText = new StringBuilder();
@@ -106,7 +107,7 @@ class OcrEngine {
             JSObject blockObj = new JSObject();
             blockObj.put("text", block.getText());
             blockObj.put("recognizedLanguage", block.getRecognizedLanguage());
-            putGeometry(blockObj, block.getBoundingBox(), block.getCornerPoints());
+            putGeometry(blockObj, block.getBoundingBox(), block.getCornerPoints(), view);
 
             if (translations != null && i < translations.size()) {
                 blockObj.put("translatedText", translations.get(i));
@@ -120,14 +121,24 @@ class OcrEngine {
                 lineObj.put("text", line.getText());
                 lineObj.put("confidence", line.getConfidence());
                 lineObj.put("recognizedLanguage", line.getRecognizedLanguage());
-                putGeometry(lineObj, line.getBoundingBox(), line.getCornerPoints());
+                putGeometry(lineObj, line.getBoundingBox(), line.getCornerPoints(), view);
 
                 JSArray elements = new JSArray();
                 for (Text.Element element : line.getElements()) {
                     JSObject elementObj = new JSObject();
                     elementObj.put("text", element.getText());
                     elementObj.put("confidence", element.getConfidence());
-                    putGeometry(elementObj, element.getBoundingBox(), element.getCornerPoints());
+                    putGeometry(elementObj, element.getBoundingBox(), element.getCornerPoints(), view);
+
+                    JSArray symbols = new JSArray();
+                    for (Text.Symbol symbol : element.getSymbols()) {
+                        JSObject symbolObj = new JSObject();
+                        symbolObj.put("text", symbol.getText());
+                        symbolObj.put("confidence", symbol.getConfidence());
+                        putGeometry(symbolObj, symbol.getBoundingBox(), symbol.getCornerPoints(), view);
+                        symbols.put(symbolObj);
+                    }
+                    elementObj.put("symbols", symbols);
                     elements.put(elementObj);
                 }
                 lineObj.put("elements", elements);
@@ -152,7 +163,7 @@ class OcrEngine {
         return result;
     }
 
-    private static void putGeometry(JSObject target, @Nullable Rect box, @Nullable Point[] corners) {
+    private static void putGeometry(JSObject target, @Nullable Rect box, @Nullable Point[] corners, @Nullable ViewMapper view) {
         if (box != null) {
             JSObject rect = new JSObject();
             rect.put("left", box.left);
@@ -160,6 +171,9 @@ class OcrEngine {
             rect.put("right", box.right);
             rect.put("bottom", box.bottom);
             target.put("boundingBox", rect);
+            if (view != null) {
+                target.put("viewBoundingBox", view.mapRect(box));
+            }
         }
         if (corners != null) {
             JSArray points = new JSArray();
@@ -170,6 +184,9 @@ class OcrEngine {
                 points.put(point);
             }
             target.put("cornerPoints", points);
+            if (view != null) {
+                target.put("viewCornerPoints", view.mapPoints(corners));
+            }
         }
     }
 }

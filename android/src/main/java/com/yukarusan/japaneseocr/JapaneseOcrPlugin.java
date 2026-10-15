@@ -205,22 +205,22 @@ public class JapaneseOcrPlugin extends Plugin {
 
     private final LiveCameraController.FrameListener frameListener = new LiveCameraController.FrameListener() {
         @Override
-        public void onFrame(Text text, int imageWidth, int imageHeight, Runnable done) {
+        public void onFrame(Text text, int imageWidth, int imageHeight, @Nullable ViewMapper view, Runnable done) {
             String target = liveTranslationTarget;
             if (target == null || text.getTextBlocks().isEmpty()) {
                 notifyListeners(
                     "textRecognized",
-                    OcrEngine.toResult(text, imageWidth, imageHeight, target == null ? null : Collections.<String>emptyList(), target)
+                    OcrEngine.toResult(text, imageWidth, imageHeight, target == null ? null : Collections.<String>emptyList(), target, view)
                 );
                 done.run();
                 return;
             }
             translation.translateAll(target, OcrEngine.blockTexts(text)).addOnCompleteListener((task) -> {
                 if (task.isSuccessful()) {
-                    notifyListeners("textRecognized", OcrEngine.toResult(text, imageWidth, imageHeight, task.getResult(), target));
+                    notifyListeners("textRecognized", OcrEngine.toResult(text, imageWidth, imageHeight, task.getResult(), target, view));
                 } else {
                     // Still deliver the Japanese text, and report why the translation is missing.
-                    notifyListeners("textRecognized", OcrEngine.toResult(text, imageWidth, imageHeight, null, null));
+                    notifyListeners("textRecognized", OcrEngine.toResult(text, imageWidth, imageHeight, null, null, view));
                     onError(TRANSLATION_FAILED, errorMessage(task.getException(), "Translation failed"));
                 }
                 done.run();
@@ -273,7 +273,7 @@ public class JapaneseOcrPlugin extends Plugin {
             controller.capture(
                 new LiveCameraController.CaptureCallback() {
                     @Override
-                    public void onCaptured(Bitmap bitmap) {
+                    public void onCaptured(Bitmap bitmap, @Nullable ViewMapper view) {
                         String imagePath = null;
                         if (saveImage) {
                             try {
@@ -284,7 +284,7 @@ public class JapaneseOcrPlugin extends Plugin {
                             }
                         }
                         String path = imagePath;
-                        recognize(InputImage.fromBitmap(bitmap, 0), target).addOnCompleteListener((task) -> {
+                        recognize(InputImage.fromBitmap(bitmap, 0), target, view).addOnCompleteListener((task) -> {
                             if (!task.isSuccessful()) {
                                 Exception e = task.getException();
                                 finishCapture(call, null, errorMessage(e, "Recognition failed"), codeOf(e));
@@ -437,7 +437,7 @@ public class JapaneseOcrPlugin extends Plugin {
                 call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
                 return;
             }
-            recognize(image, translateTo).addOnCompleteListener((task) -> {
+            recognize(image, translateTo, null).addOnCompleteListener((task) -> {
                 if (task.isSuccessful()) {
                     call.resolve(task.getResult());
                 } else {
@@ -467,7 +467,7 @@ public class JapaneseOcrPlugin extends Plugin {
     }
 
     /** Recognizes an image and optionally translates it. Failures carry an error code. */
-    private Task<JSObject> recognize(InputImage image, @Nullable String target) {
+    private Task<JSObject> recognize(InputImage image, @Nullable String target, @Nullable ViewMapper view) {
         int width = image.getRotationDegrees() % 180 == 0 ? image.getWidth() : image.getHeight();
         int height = image.getRotationDegrees() % 180 == 0 ? image.getHeight() : image.getWidth();
         return ocr.process(image).<JSObject>continueWithTask((task) -> {
@@ -476,7 +476,7 @@ public class JapaneseOcrPlugin extends Plugin {
             }
             Text text = task.getResult();
             if (target == null) {
-                return Tasks.forResult(OcrEngine.toResult(text, width, height, null, null));
+                return Tasks.forResult(OcrEngine.toResult(text, width, height, null, null, view));
             }
             return translation.isReady(target).<JSObject>continueWithTask((ready) -> {
                 if (!ready.isSuccessful() || !Boolean.TRUE.equals(ready.getResult())) {
@@ -493,7 +493,7 @@ public class JapaneseOcrPlugin extends Plugin {
                             new CodedException(TRANSLATION_FAILED, errorMessage(translated.getException(), "Translation failed"))
                         );
                     }
-                    return Tasks.forResult(OcrEngine.toResult(text, width, height, translated.getResult(), target));
+                    return Tasks.forResult(OcrEngine.toResult(text, width, height, translated.getResult(), target, view));
                 });
             });
         });

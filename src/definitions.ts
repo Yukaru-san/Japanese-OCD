@@ -59,30 +59,47 @@ export interface Rect {
   bottom: number;
 }
 
-export interface OcrElement {
-  text: string;
+/**
+ * Geometry of a recognized item.
+ *
+ * `boundingBox` and `cornerPoints` are pixels of the recognized image.
+ * `viewBoundingBox` and `viewCornerPoints` are CSS pixels relative to the WebView, so the page can
+ * place elements exactly over the word it sees in the camera preview. They are only set for
+ * results of `startLiveRecognition()` and `captureFrame()`.
+ */
+export interface OcrGeometry {
   boundingBox?: Rect;
   cornerPoints?: Point[];
+  viewBoundingBox?: Rect;
+  viewCornerPoints?: Point[];
+}
+
+/** A single character. */
+export interface OcrSymbol extends OcrGeometry {
+  text: string;
   /** Between 0 and 1. */
   confidence: number;
 }
 
-export interface OcrLine {
+export interface OcrElement extends OcrGeometry {
   text: string;
-  boundingBox?: Rect;
-  cornerPoints?: Point[];
+  /** Between 0 and 1. */
+  confidence: number;
+  symbols: OcrSymbol[];
+}
+
+export interface OcrLine extends OcrGeometry {
+  text: string;
   /** Between 0 and 1. */
   confidence: number;
   recognizedLanguage: string;
   elements: OcrElement[];
 }
 
-export interface OcrBlock {
+export interface OcrBlock extends OcrGeometry {
   text: string;
   /** Translation of this block. Only set when translation is enabled. */
   translatedText?: string;
-  boundingBox?: Rect;
-  cornerPoints?: Point[];
   recognizedLanguage: string;
   lines: OcrLine[];
 }

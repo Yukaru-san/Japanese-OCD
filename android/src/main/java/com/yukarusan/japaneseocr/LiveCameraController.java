@@ -24,6 +24,7 @@ import androidx.camera.core.resolutionselector.ResolutionSelector;
 import androidx.camera.core.resolutionselector.ResolutionStrategy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
+import androidx.camera.view.transform.OutputTransform;
 import androidx.core.content.ContextCompat;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.vision.common.InputImage;
@@ -39,7 +40,7 @@ class LiveCameraController {
 
     interface FrameListener {
         /** Called on the main thread. {@code done} must be run once the frame is fully handled. */
-        void onFrame(Text text, int imageWidth, int imageHeight, Runnable done);
+        void onFrame(Text text, int imageWidth, int imageHeight, @Nullable ViewMapper view, Runnable done);
 
         void onError(String code, String message);
     }
@@ -50,7 +51,7 @@ class LiveCameraController {
 
     interface CaptureCallback {
         /** Called on a background thread with an upright bitmap. */
-        void onCaptured(Bitmap bitmap);
+        void onCaptured(Bitmap bitmap, @Nullable ViewMapper view);
 
         void onError(String message);
     }
@@ -185,6 +186,7 @@ class LiveCameraController {
         int width = swap ? imageProxy.getHeight() : imageProxy.getWidth();
         int height = swap ? imageProxy.getWidth() : imageProxy.getHeight();
 
+        OutputTransform source = safeSource(imageProxy);
         InputImage input = InputImage.fromMediaImage(mediaImage, rotation);
         ocr.process(input).addOnCompleteListener(ContextCompat.getMainExecutor(activity), (task) -> {
             imageProxy.close();
@@ -198,7 +200,7 @@ class LiveCameraController {
                 listener.onError("RECOGNITION_FAILED", e != null ? e.getMessage() : "Recognition failed");
                 return;
             }
-            listener.onFrame(task.getResult(), width, height, () -> busy = false);
+            listener.onFrame(task.getResult(), width, height, ViewMapper.create(source, viewTarget()), () -> busy = false);
         });
     }
 
@@ -209,12 +211,14 @@ class LiveCameraController {
             return;
         }
         freezePreview();
+        ViewMapper.Target target = viewTarget();
         imageCapture.takePicture(
             captureExecutor,
             new ImageCapture.OnImageCapturedCallback() {
                 @Override
                 public void onCaptureSuccess(@NonNull ImageProxy image) {
                     Bitmap bitmap;
+                    OutputTransform source = safeSource(image);
                     int rotation;
                     try {
                         rotation = image.getImageInfo().getRotationDegrees();
@@ -229,7 +233,7 @@ class LiveCameraController {
                         if (rotated != bitmap) bitmap.recycle();
                         bitmap = rotated;
                     }
-                    callback.onCaptured(bitmap);
+                    callback.onCaptured(bitmap, ViewMapper.create(source, target));
                 }
 
                 @Override
@@ -267,6 +271,29 @@ class LiveCameraController {
         }
         frozen = false;
         lastFrameAt = 0;
+    }
+
+    @Nullable
+    private static OutputTransform safeSource(ImageProxy image) {
+        try {
+            return ViewMapper.sourceOf(image);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Current placement of the preview relative to the WebView. Main thread only. */
+    @Nullable
+    private ViewMapper.Target viewTarget() {
+        if (previewView == null) return null;
+        OutputTransform previewTransform = previewView.getOutputTransform();
+        if (previewTransform == null) return null;
+        return new ViewMapper.Target(
+            previewTransform,
+            previewView.getLeft() - webView.getLeft(),
+            previewView.getTop() - webView.getTop(),
+            webView.getResources().getDisplayMetrics().density
+        );
     }
 
     boolean hasFlash() {
