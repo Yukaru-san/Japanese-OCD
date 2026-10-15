@@ -189,3 +189,14 @@ pre {
   color: var(--muted);
   margin-bottom: 4px;
 }
+
+#result-ruby {
+  font-size: 1.25rem;
+  line-height: 2.2;
+  margin-bottom: 4px;
+}
+
+#result-ruby rt {
+  font-size: 0.6em;
+  color: var(--muted);
+}

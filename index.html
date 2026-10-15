@@ -56,6 +56,7 @@
           <button id="gallery" class="primary">Aus Galerie wählen</button>
           <input type="file" id="file" accept="image/*" />
         </div>
+        <label class="row"><input type="checkbox" id="select-region" checked /> Textstellen einrahmen</label>
       </section>
 
       <section>
@@ -63,6 +64,7 @@
         <textarea id="result" rows="6" placeholder="Erkannter Text"></textarea>
         <textarea id="result-translation" rows="4" placeholder="Übersetzung"></textarea>
         <img id="captured-image" alt="" hidden />
+        <div id="result-ruby" lang="ja"></div>
         <div id="result-words"></div>
         <div id="result-furigana"></div>
         <div class="row">
