@@ -14,6 +14,7 @@ const JapaneseOcr = registerPlugin<JapaneseOcrPlugin>('JapaneseOcr', {
 export * from './definitions';
 export { findText } from './find-text';
 export type { TextMatch } from './find-text';
+export { toRubyHtml } from './ruby';
 export { JapaneseOcr };
 
 const ERROR_CODES: readonly JapaneseOcrErrorCode[] = [
