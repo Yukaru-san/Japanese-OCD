@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="japanese_ocr_select_hint">読み取りたい文字を枠で囲んでください。枠は複数作成できます。枠がない場合は画像全体を読み取ります。</string>
+    <string name="japanese_ocr_select_rotate">回転</string>
+    <string name="japanese_ocr_select_clear">クリア</string>
+    <string name="japanese_ocr_select_cancel">キャンセル</string>
+    <string name="japanese_ocr_select_done">読み取る</string>
+</resources>

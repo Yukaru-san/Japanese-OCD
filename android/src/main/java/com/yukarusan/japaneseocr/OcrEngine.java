@@ -79,99 +79,112 @@ class OcrEngine {
         ready = false;
     }
 
-    /** Lines of a result regrouped into paragraphs in reading order, with furigana split off. */
+    /** A recognition result regrouped into paragraphs in reading order, with furigana split off. */
     static final class Arranged {
 
-        final List<List<Text.Line>> paragraphs = new ArrayList<>();
-        final List<Text.Line> furigana = new ArrayList<>();
-        final List<Text.Line> main = new ArrayList<>();
-        boolean vertical;
+        final List<Text.Line> lines = new ArrayList<>();
+        ReadingOrder.Layout layout;
+
+        /** Lines ML Kit returned without a box; only used when no regions are given. */
+        final List<Text.Line> unboxed = new ArrayList<>();
+
+        /** Text of every paragraph (result block) in reading order. */
+        List<String> texts() {
+            List<String> result = new ArrayList<>();
+            for (ReadingOrder.Paragraph paragraph : layout.paragraphs) result.add(paragraph.text);
+            for (Text.Line line : unboxed) result.add(line.getText());
+            return result;
+        }
     }
 
-    static Arranged arrange(Text text) {
+    /**
+     * @param regions only text inside these boxes (image pixels) is returned; null for everything
+     */
+    static Arranged arrange(Text text, @Nullable List<ReadingOrder.Box> regions) {
         Arranged arranged = new Arranged();
-        List<Text.Line> boxed = new ArrayList<>();
         List<ReadingOrder.Line> input = new ArrayList<>();
-        List<Text.Line> unboxed = new ArrayList<>();
         for (Text.TextBlock block : text.getTextBlocks()) {
             for (Text.Line line : block.getLines()) {
                 Rect box = line.getBoundingBox();
                 if (box == null) {
-                    unboxed.add(line);
+                    if (regions == null) arranged.unboxed.add(line);
                     continue;
                 }
-                boxed.add(line);
-                input.add(new ReadingOrder.Line(line.getText(), box.left, box.top, box.right, box.bottom));
+                arranged.lines.add(line);
+                input.add(new ReadingOrder.Line(line.getText(), box.left, box.top, box.right, box.bottom, glyphsOf(line)));
             }
         }
-
-        ReadingOrder.Layout layout = ReadingOrder.arrange(input);
-        arranged.vertical = layout.vertical;
-        for (List<Integer> indexes : layout.paragraphs) {
-            List<Text.Line> paragraph = new ArrayList<>();
-            for (int i : indexes) paragraph.add(boxed.get(i));
-            arranged.paragraphs.add(paragraph);
-            arranged.main.addAll(paragraph);
-        }
-        for (int i : layout.furigana) arranged.furigana.add(boxed.get(i));
-        for (Text.Line line : unboxed) {
-            arranged.paragraphs.add(Collections.singletonList(line));
-        }
+        arranged.layout = ReadingOrder.arrange(input, regions);
         return arranged;
     }
 
-    static String paragraphText(List<Text.Line> lines) {
-        List<String> parts = new ArrayList<>();
-        for (Text.Line line : lines) parts.add(line.getText());
-        return ReadingOrder.join(parts);
-    }
-
-    /** Text of every paragraph (result block) in reading order. */
-    static List<String> blockTexts(Text text) {
-        List<String> result = new ArrayList<>();
-        for (List<Text.Line> paragraph : arrange(text).paragraphs) {
-            result.add(paragraphText(paragraph));
+    /** The line's symbols with their word index, or an empty list if any symbol lacks a box. */
+    private static List<ReadingOrder.Glyph> glyphsOf(Text.Line line) {
+        List<ReadingOrder.Glyph> glyphs = new ArrayList<>();
+        List<Text.Element> elements = line.getElements();
+        for (int e = 0; e < elements.size(); e++) {
+            for (Text.Symbol symbol : elements.get(e).getSymbols()) {
+                Rect box = symbol.getBoundingBox();
+                if (box == null) return Collections.emptyList();
+                glyphs.add(new ReadingOrder.Glyph(symbol.getText(), e, box.left, box.top, box.right, box.bottom));
+            }
         }
-        return result;
+        return glyphs;
     }
 
     /**
      * Builds the JS result. Blocks are paragraphs in reading order; furigana are returned
-     * separately and are not part of {@code text}.
+     * separately and are not part of {@code text}, and each block lists its text split into
+     * segments with their readings.
      *
      * @param translations one entry per block, or null when translation is off
      */
     static JSObject toResult(
-        Text text,
+        Arranged arranged,
         int imageWidth,
         int imageHeight,
         @Nullable List<String> translations,
         @Nullable String targetLanguage,
         @Nullable ViewMapper view
     ) {
-        Arranged arranged = arrange(text);
+        ReadingOrder.Layout layout = arranged.layout;
         JSArray blocks = new JSArray();
         StringBuilder allText = new StringBuilder();
         StringBuilder allTranslated = new StringBuilder();
 
-        for (int i = 0; i < arranged.paragraphs.size(); i++) {
-            List<Text.Line> paragraph = arranged.paragraphs.get(i);
-            String paragraphText = paragraphText(paragraph);
+        int count = layout.paragraphs.size() + arranged.unboxed.size();
+        for (int i = 0; i < count; i++) {
             JSObject blockObj = new JSObject();
+            JSArray lines = new JSArray();
+            String paragraphText;
+            if (i < layout.paragraphs.size()) {
+                ReadingOrder.Paragraph paragraph = layout.paragraphs.get(i);
+                paragraphText = paragraph.text;
+                Rect box = null;
+                for (ReadingOrder.Part part : paragraph.parts) {
+                    Text.Line line = arranged.lines.get(part.line);
+                    lines.put(lineToJson(line, part.glyphs, view));
+                    Rect partBox = new Rect(part.box.left, part.box.top, part.box.right, part.box.bottom);
+                    if (box == null) box = partBox;
+                    else box.union(partBox);
+                }
+                blockObj.put("recognizedLanguage", arranged.lines.get(paragraph.parts.get(0).line).getRecognizedLanguage());
+                putGeometry(blockObj, box, box == null ? null : corners(box), view);
+                if (paragraph.region >= 0) blockObj.put("region", paragraph.region);
+                blockObj.put("segments", segmentsToJson(ReadingOrder.segments(paragraph.text, layout.ruby, i)));
+            } else {
+                Text.Line line = arranged.unboxed.get(i - layout.paragraphs.size());
+                paragraphText = line.getText();
+                blockObj.put("recognizedLanguage", line.getRecognizedLanguage());
+                lines.put(lineToJson(line, null, view));
+                blockObj.put("segments", segmentsToJson(Collections.singletonList(new ReadingOrder.Segment(paragraphText, null))));
+            }
             blockObj.put("text", paragraphText);
-            blockObj.put("recognizedLanguage", paragraph.get(0).getRecognizedLanguage());
-            Rect box = union(paragraph);
-            putGeometry(blockObj, box, box == null ? null : corners(box), view);
 
             if (translations != null && i < translations.size()) {
                 blockObj.put("translatedText", translations.get(i));
                 if (allTranslated.length() > 0) allTranslated.append('\n');
                 allTranslated.append(translations.get(i));
-            }
-
-            JSArray lines = new JSArray();
-            for (Text.Line line : paragraph) {
-                lines.put(lineToJson(line, view));
             }
             blockObj.put("lines", lines);
             blocks.put(blockObj);
@@ -181,12 +194,17 @@ class OcrEngine {
         }
 
         JSArray furigana = new JSArray();
-        for (Text.Line line : arranged.furigana) {
+        for (ReadingOrder.Ruby ruby : layout.ruby) {
             JSObject reading = new JSObject();
-            reading.put("text", line.getText().replaceAll("\\s+", ""));
-            String base = baseText(line, arranged.main, arranged.vertical);
-            if (base != null) reading.put("base", base);
-            putGeometry(reading, line.getBoundingBox(), line.getCornerPoints(), view);
+            reading.put("text", ruby.reading);
+            if (ruby.base != null) reading.put("base", ruby.base);
+            if (ruby.paragraph >= 0) reading.put("block", ruby.paragraph);
+            if (ruby.start >= 0) {
+                reading.put("start", ruby.start);
+                reading.put("end", ruby.end);
+            }
+            Rect box = new Rect(ruby.left, ruby.top, ruby.right, ruby.bottom);
+            putGeometry(reading, box, corners(box), view);
             furigana.put(reading);
         }
 
@@ -198,98 +216,84 @@ class OcrEngine {
         }
         result.put("blocks", blocks);
         result.put("furigana", furigana);
-        result.put("vertical", arranged.vertical);
+        result.put("vertical", layout.vertical);
         result.put("imageWidth", imageWidth);
         result.put("imageHeight", imageHeight);
         return result;
     }
 
-    private static JSObject lineToJson(Text.Line line, @Nullable ViewMapper view) {
+    private static JSArray segmentsToJson(List<ReadingOrder.Segment> segments) {
+        JSArray result = new JSArray();
+        for (ReadingOrder.Segment segment : segments) {
+            JSObject obj = new JSObject();
+            obj.put("text", segment.text);
+            if (segment.reading != null) obj.put("reading", segment.reading);
+            result.put(obj);
+        }
+        return result;
+    }
+
+    /**
+     * @param glyphs indexes of the symbols to include (counted across the line's elements), or null
+     *     for the whole line
+     */
+    private static JSObject lineToJson(Text.Line line, @Nullable List<Integer> glyphs, @Nullable ViewMapper view) {
         JSObject lineObj = new JSObject();
-        lineObj.put("text", line.getText());
         lineObj.put("confidence", line.getConfidence());
         lineObj.put("recognizedLanguage", line.getRecognizedLanguage());
-        putGeometry(lineObj, line.getBoundingBox(), line.getCornerPoints(), view);
 
         JSArray elements = new JSArray();
+        List<String> words = new ArrayList<>();
+        Rect lineBox = null;
+        int index = 0;
         for (Text.Element element : line.getElements()) {
-            JSObject elementObj = new JSObject();
-            elementObj.put("text", element.getText());
-            elementObj.put("confidence", element.getConfidence());
-            putGeometry(elementObj, element.getBoundingBox(), element.getCornerPoints(), view);
-
             JSArray symbols = new JSArray();
+            StringBuilder word = new StringBuilder();
+            Rect wordBox = null;
             for (Text.Symbol symbol : element.getSymbols()) {
+                boolean included = glyphs == null || glyphs.contains(index);
+                index++;
+                if (!included) continue;
                 JSObject symbolObj = new JSObject();
                 symbolObj.put("text", symbol.getText());
                 symbolObj.put("confidence", symbol.getConfidence());
                 putGeometry(symbolObj, symbol.getBoundingBox(), symbol.getCornerPoints(), view);
                 symbols.put(symbolObj);
+                word.append(symbol.getText());
+                Rect box = symbol.getBoundingBox();
+                if (box != null) {
+                    if (wordBox == null) wordBox = new Rect(box);
+                    else wordBox.union(box);
+                }
+            }
+            if (glyphs != null && symbols.length() == 0) continue;
+
+            JSObject elementObj = new JSObject();
+            elementObj.put("text", glyphs == null ? element.getText() : word.toString());
+            elementObj.put("confidence", element.getConfidence());
+            if (glyphs == null) {
+                putGeometry(elementObj, element.getBoundingBox(), element.getCornerPoints(), view);
+            } else {
+                putGeometry(elementObj, wordBox, wordBox == null ? null : corners(wordBox), view);
             }
             elementObj.put("symbols", symbols);
             elements.put(elementObj);
+            words.add(glyphs == null ? element.getText() : word.toString());
+            if (wordBox != null) {
+                if (lineBox == null) lineBox = new Rect(wordBox);
+                else lineBox.union(wordBox);
+            }
+        }
+
+        if (glyphs == null) {
+            lineObj.put("text", line.getText());
+            putGeometry(lineObj, line.getBoundingBox(), line.getCornerPoints(), view);
+        } else {
+            lineObj.put("text", ReadingOrder.join(words));
+            putGeometry(lineObj, lineBox, lineBox == null ? null : corners(lineBox), view);
         }
         lineObj.put("elements", elements);
         return lineObj;
-    }
-
-    /**
-     * The characters a furigana line is printed over: in the nearest main line below it (or to its
-     * left in vertical text), the characters within its extent.
-     */
-    @Nullable
-    private static String baseText(Text.Line reading, List<Text.Line> main, boolean vertical) {
-        Rect r = reading.getBoundingBox();
-        if (r == null) return null;
-        int size = vertical ? r.width() : r.height();
-
-        Text.Line nearest = null;
-        int nearestDistance = Integer.MAX_VALUE;
-        for (Text.Line line : main) {
-            Rect b = line.getBoundingBox();
-            if (b == null) continue;
-            int distance;
-            if (vertical) {
-                boolean overlaps = b.top < r.bottom && b.bottom > r.top;
-                distance = r.left - b.right;
-                if (!overlaps || b.centerX() >= r.centerX()) continue;
-            } else {
-                boolean overlaps = b.left < r.right && b.right > r.left;
-                distance = b.top - r.bottom;
-                if (!overlaps || b.centerY() <= r.centerY()) continue;
-            }
-            distance = Math.abs(distance);
-            if (distance < nearestDistance && distance < size * 3) {
-                nearest = line;
-                nearestDistance = distance;
-            }
-        }
-        if (nearest == null) return null;
-
-        int from = (vertical ? r.top : r.left) - size / 2;
-        int to = (vertical ? r.bottom : r.right) + size / 2;
-        StringBuilder base = new StringBuilder();
-        for (Text.Element element : nearest.getElements()) {
-            for (Text.Symbol symbol : element.getSymbols()) {
-                Rect s = symbol.getBoundingBox();
-                if (s == null) continue;
-                int center = vertical ? s.centerY() : s.centerX();
-                if (center >= from && center <= to) base.append(symbol.getText());
-            }
-        }
-        return base.length() > 0 ? base.toString() : null;
-    }
-
-    @Nullable
-    private static Rect union(List<Text.Line> lines) {
-        Rect result = null;
-        for (Text.Line line : lines) {
-            Rect box = line.getBoundingBox();
-            if (box == null) continue;
-            if (result == null) result = new Rect(box);
-            else result.union(box);
-        }
-        return result;
     }
 
     private static Point[] corners(Rect box) {

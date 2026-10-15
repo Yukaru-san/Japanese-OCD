@@ -118,6 +118,22 @@ export interface OcrFurigana extends OcrGeometry {
   text: string;
   /** The characters it belongs to, e.g. `日本`, when they could be located. */
   base?: string;
+  /** Index of the block in `blocks` that contains `base`. */
+  block?: number;
+  /** Start of `base` in that block's `text` (UTF-16 index, like `String.slice`). */
+  start?: number;
+  /** End of `base` in that block's `text`, exclusive. */
+  end?: number;
+}
+
+/**
+ * A piece of a block's text. Pieces with furigana carry their `reading`; joined, the pieces give
+ * the block's `text`. Render them as `<ruby>text<rt>reading</rt></ruby>`.
+ */
+export interface OcrSegment {
+  text: string;
+  /** The furigana printed over `text`, e.g. `にほん` for `日本`. */
+  reading?: string;
 }
 
 /** A paragraph: consecutive lines of the same text size, in reading order. */
@@ -127,6 +143,10 @@ export interface OcrBlock extends OcrGeometry {
   translatedText?: string;
   recognizedLanguage: string;
   lines: OcrLine[];
+  /** `text` split into pieces with and without furigana. */
+  segments: OcrSegment[];
+  /** Index in `regions` of the region this block was selected from. Only set when regions were used. */
+  region?: number;
 }
 
 export interface OcrResult {
@@ -149,6 +169,13 @@ export interface OcrResult {
   imageWidth: number;
   /** Height of the (upright) image the coordinates refer to. */
   imageHeight: number;
+  /**
+   * The regions text was taken from, in image pixels, in the order the user drew them (or you
+   * passed them). Not set when the whole image was recognized.
+   */
+  regions?: Rect[];
+  /** Clockwise rotation in degrees the user applied in the selection screen, when not 0. */
+  rotation?: number;
 }
 
 export interface CaptureResult extends OcrResult {
@@ -206,16 +233,28 @@ export interface RecognizeImageOptions {
   base64?: string;
   /** Translate the recognized text. */
   translation?: TranslationOptions;
+  /**
+   * Show the image full-screen first, so the user can rotate it and draw frames around the text
+   * they want. Only text inside the frames is returned, together with its furigana, even when
+   * the furigana lies just outside a frame. Without a frame the whole image is recognized.
+   * Rejects with `CANCELLED` when the user cancels.
+   *
+   * @default false
+   */
+  selectRegion?: boolean;
+  /**
+   * Only return text inside these boxes (pixels of the upright image), region by region.
+   * Use this with your own selection UI; ignored when `selectRegion` is set.
+   */
+  regions?: Rect[];
 }
 
-export interface GalleryOptions {
-  /** Translate the recognized text. */
-  translation?: TranslationOptions;
-}
+export type GalleryOptions = Omit<RecognizeImageOptions, 'path' | 'base64'>;
 
 export interface GalleryResult extends OcrResult {
   /**
-   * `content://` URI of the chosen image. Use `Capacitor.convertFileSrc()` to show it in an `<img>`.
+   * `content://` URI of the chosen image, or `file://` path of the rotated copy when the user
+   * rotated it in the selection screen. Use `Capacitor.convertFileSrc()` to show it in an `<img>`.
    */
   imagePath: string;
 }
@@ -324,7 +363,9 @@ export interface JapaneseOcrPlugin {
 
   /**
    * Lets the user pick an image from the gallery (system photo picker, no permission needed) and
-   * recognizes its Japanese text. Rejects with `CANCELLED` when the picker is closed.
+   * recognizes its Japanese text. With `selectRegion: true` the user can then rotate the image
+   * and frame the text they want. Rejects with `CANCELLED` when the picker or the selection
+   * screen is closed.
    */
   recognizeFromGallery(options?: GalleryOptions): Promise<GalleryResult>;
 

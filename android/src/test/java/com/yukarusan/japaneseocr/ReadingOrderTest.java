@@ -15,14 +15,44 @@ public class ReadingOrderTest {
         return new ReadingOrder.Line(text, left, top, right, bottom);
     }
 
+    /** A line with evenly spaced characters; spaces separate words and take one character width. */
+    private static ReadingOrder.Line glyphs(String text, int left, int top, int charWidth, int height) {
+        List<ReadingOrder.Glyph> glyphs = new ArrayList<>();
+        int x = left;
+        int word = 0;
+        for (int i = 0; i < text.length(); i++) {
+            String c = text.substring(i, i + 1);
+            if (c.equals(" ")) {
+                word++;
+            } else {
+                glyphs.add(new ReadingOrder.Glyph(c, word, x, top, x + charWidth, top + height));
+            }
+            x += charWidth;
+        }
+        return new ReadingOrder.Line(text, left, top, x, top + height, glyphs);
+    }
+
     private static List<String> paragraphs(List<ReadingOrder.Line> lines, ReadingOrder.Layout layout) {
         List<String> result = new ArrayList<>();
-        for (List<Integer> paragraph : layout.paragraphs) {
-            List<String> parts = new ArrayList<>();
-            for (int i : paragraph) parts.add(lines.get(i).text);
-            result.add(ReadingOrder.join(parts));
+        for (ReadingOrder.Paragraph paragraph : layout.paragraphs) result.add(paragraph.text);
+        return result;
+    }
+
+    private static List<String> ruby(ReadingOrder.Layout layout) {
+        List<String> result = new ArrayList<>();
+        for (ReadingOrder.Ruby r : layout.ruby) {
+            String placed = r.start >= 0 ? layout.paragraphs.get(r.paragraph).text.substring(r.start, r.end) : "?";
+            result.add(r.base + "=" + r.reading + "@" + placed);
         }
         return result;
+    }
+
+    private static String rubyText(ReadingOrder.Layout layout, int paragraph) {
+        StringBuilder text = new StringBuilder();
+        for (ReadingOrder.Segment s : ReadingOrder.segments(layout.paragraphs.get(paragraph).text, layout.ruby, paragraph)) {
+            text.append(s.reading == null ? s.text : s.text + "(" + s.reading + ")");
+        }
+        return text.toString();
     }
 
     private static List<String> furigana(List<ReadingOrder.Line> lines, ReadingOrder.Layout layout) {
@@ -97,5 +127,66 @@ public class ReadingOrderTest {
     public void joinsLatinWithSpace() {
         assertEquals("Tomo Chat app", ReadingOrder.join(Arrays.asList("Tomo Chat", "app")));
         assertEquals("日本語です", ReadingOrder.join(Arrays.asList("日本語", "です")));
+    }
+
+    /**
+     * Heading furigana is about as tall as body text, so the page-wide size check misses it; it
+     * still has to be recognized by the heading it sits on. Readings of neighbouring words that
+     * ML Kit merged into one line are split and paired with their kanji.
+     */
+    @Test
+    public void pairsHeadingFuriganaWithItsKanji() {
+        List<ReadingOrder.Line> lines = Arrays.asList(
+            glyphs("32", 700, 20, 20, 30), // UI badge
+            glyphs("にほん がっこう", 205, 100, 30, 36),
+            glyphs("じょし", 555, 100, 30, 36),
+            glyphs("なぜ日本の学校では女子の", 100, 140, 50, 56),
+            glyphs("にほん   がっこう", 113, 300, 18, 22),
+            glyphs("日本の学校では、女子が", 100, 324, 40, 44),
+            glyphs("がっこう   せんせい", 104, 400, 18, 22),
+            glyphs("学校の先生の中には", 100, 424, 40, 44),
+            glyphs("たのしいです", 100, 480, 40, 44)
+        );
+        ReadingOrder.Layout layout = ReadingOrder.arrange(lines);
+
+        assertEquals(
+            Arrays.asList("32", "なぜ日本の学校では女子の", "日本の学校では、女子が学校の先生の中にはたのしいです"),
+            paragraphs(lines, layout)
+        );
+        assertEquals("なぜ日本(にほん)の学校(がっこう)では女子(じょし)の", rubyText(layout, 1));
+        assertTrue(ruby(layout).contains("先生=せんせい@先生"));
+    }
+
+    /** A selected region returns only its text, with the furigana printed just above it. */
+    @Test
+    public void selectsRegionWithItsFurigana() {
+        List<ReadingOrder.Line> lines = Arrays.asList(
+            glyphs("32", 700, 20, 20, 30),
+            glyphs("にほん", 113, 300, 18, 22),
+            glyphs("日本の学校では、女子が", 100, 324, 40, 44),
+            glyphs("がっこう", 104, 400, 18, 22),
+            glyphs("学校の先生の中には", 100, 424, 40, 44)
+        );
+        // Covers the first main line only; its furigana lies above the region.
+        List<ReadingOrder.Box> regions = Arrays.asList(new ReadingOrder.Box(90, 320, 600, 370));
+        ReadingOrder.Layout layout = ReadingOrder.arrange(lines, regions);
+
+        assertEquals(Arrays.asList("日本の学校では、女子が"), paragraphs(lines, layout));
+        assertEquals(Arrays.asList("日本=にほん@日本"), ruby(layout));
+        assertEquals(0, layout.paragraphs.get(0).region);
+
+        // Part of a line: only the characters inside, readings still placed.
+        regions = Arrays.asList(new ReadingOrder.Box(90, 320, 310, 370), new ReadingOrder.Box(90, 420, 300, 470));
+        layout = ReadingOrder.arrange(lines, regions);
+        assertEquals(Arrays.asList("日本の学校", "学校の先生"), paragraphs(lines, layout));
+        assertEquals("日本(にほん)の学校", rubyText(layout, 0));
+        assertEquals("学校(がっこう)の先生", rubyText(layout, 1));
+        assertEquals(1, layout.paragraphs.get(1).region);
+    }
+
+    @Test
+    public void findsKanji() {
+        assertTrue(ReadingOrder.hasKanji("ポニーテールが禁止"));
+        assertFalse(ReadingOrder.hasKanji("にほん がっこう"));
     }
 }

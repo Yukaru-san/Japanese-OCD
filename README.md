@@ -4,7 +4,8 @@ Japanese text recognition (OCR) for Capacitor apps, on the device, with Google M
 
 - **Live camera:** the camera preview runs behind your web page, recognized text arrives as events.
 - **Capture:** freeze the picture and get its text, optionally the photo as a file.
-- **Gallery & images:** let the user pick a photo from the gallery, or pass an image (file path or base64).
+- **Gallery & images:** let the user pick a photo from the gallery, or pass an image (file path or base64), and
+  optionally let them rotate it and frame the text they want.
 - **Translation (optional):** Japanese → another language, on the device, switchable at any time.
 - **Positions:** every block, line and character comes with its position on screen, so you can draw your own
   highlights or buttons over recognized words.
@@ -181,6 +182,25 @@ try {
 No permission is needed: Android's photo picker only hands over the image the user chose. The camera does not
 have to be running. Results have `boundingBox` but no `viewBoundingBox`, since the image is not on screen.
 
+### Let the user frame the text they want
+
+Add `selectRegion: true` and the plugin shows the picked image full-screen first. The user can rotate it and drag
+one or more frames around the text they care about (drag a corner to resize, the red × removes a frame). Only the
+text inside the frames is returned, frame by frame in the order they were drawn, together with the furigana of that
+text, even when the furigana sits just above the frame. Without a frame the whole image is recognized.
+
+```ts
+const result = await JapaneseOcr.recognizeFromGallery({ selectRegion: true });
+result.text;        // only the framed text
+result.regions;     // the frames, in image pixels
+result.blocks[0].region; // which frame a block came from
+```
+
+`recognizeImage({ path, selectRegion: true })` works the same for an image you already have. With your own selection
+UI, pass the boxes instead: `recognizeImage({ path, regions: [{ left, top, right, bottom }] })` (pixels of the
+upright image). Cancelling the selection screen rejects with `CANCELLED`. The screen follows the device language
+(English, German, Japanese); override the `japanese_ocr_select_*` strings in your app's `strings.xml` to change it.
+
 ### Recognize an existing image
 
 ```ts
@@ -195,17 +215,23 @@ ML Kit finds text pieces in no particular order. The plugin puts them in reading
 - Horizontal text: top to bottom, left to right. Vertical text (`result.vertical`): columns right to left.
 - Lines that belong together become one paragraph (`blocks`), joined without line breaks, so
   `result.text` reads like the original. A change in text size (title vs. body) or a clear gap starts a new paragraph.
-- Furigana (small kana over kanji) are taken out of `text` and returned in `result.furigana`, each with
-  the kanji it belongs to when found:
+- Furigana (small kana over kanji) are taken out of `text` and returned in `result.furigana`, one entry per word,
+  with the kanji it belongs to and where they are in the block's text. Each block also comes split into
+  `segments`, so you can show the text with its readings right away:
 
 ```ts
 const result = await JapaneseOcr.recognizeFromGallery();
 result.text;     // "なぜ日本の学校では女子のポニーテールが禁止されていたの？\n2026-10-14\n日本の学校では、…"
-result.furigana; // [{ text: 'にほん', base: '日本', ... }, { text: 'がっこう', base: '学校', ... }, ...]
+result.furigana; // [{ text: 'にほん', base: '日本', block: 0, start: 2, end: 4, ... }, { text: 'がっこう', base: '学校', ... }, ...]
+result.blocks[0].segments; // [{ text: 'なぜ' }, { text: '日本', reading: 'にほん' }, { text: 'の' }, ...]
+
+element.innerHTML = toRubyHtml(result); // <ruby>日本<rt>にほん</rt></ruby>の<ruby>学校<rt>がっこう</rt></ruby>…
 ```
 
+`toRubyHtml` is exported from the package and escapes the text.
+
 Text that is part of the image but not of the content (app buttons, badges, clock in a screenshot) is still
-recognized; crop the image if you only want the article.
+recognized; use `selectRegion: true` to let the user frame only the article.
 
 ## Behaviour you can rely on
 
@@ -238,7 +264,7 @@ Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to
 | `RECOGNITION_FAILED`    | The image could not be loaded or recognized.                  |
 | `TRANSLATION_NOT_READY` | The translation model is not downloaded. Call `prepareTranslation()`. |
 | `TRANSLATION_FAILED`    | Translating failed.                                           |
-| `CANCELLED`             | The user closed the photo picker without choosing an image.   |
+| `CANCELLED`             | The user closed the photo picker or the selection screen.     |
 
 ## API
 
@@ -256,12 +282,13 @@ All methods return Promises. Types are exported from the package.
 | `getLiveState()`                           | `{ running, frozen, translation }` |                                                  |
 | `setTorch({ enabled })`                    | `void`                     |                                                          |
 | `setTranslation({ enabled, targetLanguage? })` | `void`                 |                                                          |
-| `recognizeImage({ path?, base64?, translation? })` | `OcrResult`        |                                                          |
-| `recognizeFromGallery({ translation? }?)`  | `GalleryResult`            | `OcrResult` plus `imagePath` (`content://`).            |
+| `recognizeImage({ path?, base64?, translation?, selectRegion?, regions? })` | `OcrResult` | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes. |
+| `recognizeFromGallery({ translation?, selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating). |
 | `prepareTranslation({ targetLanguage?, requireWifi? })` | `void`        | Downloads the model if needed.                           |
 | `isTranslationReady({ targetLanguage? })`  | `{ ready }`                | Never throws.                                            |
 | `findText(result, text)` (function)        | `TextMatch[]`              | Position of a word in a result. Not async.               |
 | `isJapaneseOcrError(e)` (function)         | `boolean`                  | Type guard for caught errors.                            |
+| `toRubyHtml(resultOrBlock)` (function)     | `string`                   | Escaped HTML with furigana as `<ruby>`. Not async.       |
 | `translateText({ text, targetLanguage? })` | `{ text, targetLanguage }` |                                                          |
 | `addListener('textRecognized', fn)`        | `PluginListenerHandle`     | `fn(result: OcrResult)` for every live frame.            |
 | `addListener('liveRecognitionError', fn)`  | `PluginListenerHandle`     | `fn({ code, message })` when a live frame fails.         |
@@ -279,16 +306,29 @@ interface OcrResult {
   vertical: boolean;         // vertical writing detected
   imageWidth: number;        // size of the image that boundingBox refers to
   imageHeight: number;
+  regions?: Rect[];          // frames the text was taken from (selectRegion / regions)
+  rotation?: number;         // degrees the user rotated the image in the selection screen
 }
 interface CaptureResult extends OcrResult {
   imagePath?: string;        // with saveImage: true
 }
 
-interface OcrBlock extends OcrGeometry { text: string; translatedText?: string; recognizedLanguage: string; lines: OcrLine[] }
+interface OcrBlock extends OcrGeometry {
+  text: string; translatedText?: string; recognizedLanguage: string; lines: OcrLine[];
+  segments: OcrSegment[];    // text split into pieces; pieces with furigana have a reading
+  region?: number;           // index in result.regions
+}
+interface OcrSegment { text: string; reading?: string } // e.g. { text: '日本', reading: 'にほん' }
 interface OcrLine extends OcrGeometry { text: string; confidence: number; recognizedLanguage: string; elements: OcrElement[] }
 interface OcrElement extends OcrGeometry { text: string; confidence: number; symbols: OcrSymbol[] }
 interface OcrSymbol extends OcrGeometry { text: string; confidence: number } // one character
-interface OcrFurigana extends OcrGeometry { text: string; base?: string }    // e.g. { text: 'にほん', base: '日本' }
+interface OcrFurigana extends OcrGeometry {
+  text: string;              // the reading, e.g. 'にほん'
+  base?: string;             // the kanji it belongs to, e.g. '日本'
+  block?: number;            // blocks[block].text.slice(start, end) === base
+  start?: number;
+  end?: number;
+}
 
 interface OcrGeometry {
   boundingBox?: Rect;        // pixels of the recognized image
