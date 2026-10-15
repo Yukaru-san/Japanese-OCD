@@ -12,7 +12,8 @@ interface Glyph {
 export interface WordMatch {
   word: string;
   entry: GlossaryEntry;
-  box: Rect;
+  /** Position in the WebView; missing for gallery images, which are not on screen. */
+  box?: Rect;
 }
 
 /** Splits a line into characters with WebView boxes, using symbols when ML Kit provides them. */
@@ -79,9 +80,7 @@ export function findWords(result: OcrResult): WordMatch[] {
         const boxes = [...new Set(owner.slice(i, i + length))]
           .map((g) => glyphs[g].box)
           .filter((b): b is Rect => !!b);
-        if (boxes.length) {
-          matches.push({ word, entry: glossary[word], box: union(boxes) });
-        }
+        matches.push({ word, entry: glossary[word], box: boxes.length ? union(boxes) : undefined });
         i += length;
       }
     }
@@ -104,23 +103,25 @@ export class WordOverlay {
   render(result: OcrResult): WordMatch[] {
     const matches = findWords(result);
     this.layer.replaceChildren(
-      ...matches.map((match) => {
+      ...matches.flatMap((match) => {
+        const box = match.box;
+        if (!box) return [];
         const marker = document.createElement('button');
         marker.className = 'word-marker';
         marker.dataset.word = match.word;
         marker.title = match.word;
         const pad = 4;
         Object.assign(marker.style, {
-          left: `${match.box.left - pad}px`,
-          top: `${match.box.top - pad}px`,
-          width: `${match.box.right - match.box.left + pad * 2}px`,
-          height: `${match.box.bottom - match.box.top + pad * 2}px`,
+          left: `${box.left - pad}px`,
+          top: `${box.top - pad}px`,
+          width: `${box.right - box.left + pad * 2}px`,
+          height: `${box.bottom - box.top + pad * 2}px`,
         });
         marker.addEventListener('click', (event) => {
           event.stopPropagation();
-          this.openPopup(match);
+          this.openPopup(match, box);
         });
-        return marker;
+        return [marker];
       }),
     );
     return matches;
@@ -131,7 +132,7 @@ export class WordOverlay {
     this.closePopup();
   }
 
-  private openPopup(match: WordMatch): void {
+  private openPopup(match: WordMatch, box: Rect): void {
     this.openWord = match.word;
     this.popup.replaceChildren();
     const title = document.createElement('strong');
@@ -143,8 +144,8 @@ export class WordOverlay {
     note.className = 'note';
     note.textContent = match.entry.note;
     this.popup.append(title, meaning, note);
-    const left = Math.max(8, Math.min(match.box.left, window.innerWidth - 248));
-    const below = match.box.bottom + 8;
+    const left = Math.max(8, Math.min(box.left, window.innerWidth - 248));
+    const below = box.bottom + 8;
     Object.assign(this.popup.style, { left: `${left}px`, top: `${below}px` });
     this.popup.hidden = false;
   }

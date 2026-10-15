@@ -149,6 +149,17 @@ async function recognizeFile(file: File): Promise<void> {
   if (result) showResult(result);
 }
 
+async function recognizeGallery(): Promise<void> {
+  try {
+    const result = await JapaneseOcr.recognizeFromGallery({ translation: translation() });
+    showResult(result);
+    log('recognizeFromGallery ok');
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    log(code === 'CANCELLED' ? 'Galerie: keine Auswahl' : 'recognizeFromGallery', code === 'CANCELLED' ? undefined : error);
+  }
+}
+
 async function copy(text: string, label: string): Promise<void> {
   if (!text) {
     log(`${label}: nichts zu kopieren`);
@@ -185,6 +196,7 @@ async function init(): Promise<void> {
     if (ok) torchOn = !torchOn;
   };
   $('live-translate').onclick = () => void toggleLiveTranslation();
+  $('gallery').onclick = () => void recognizeGallery();
   $<HTMLInputElement>('file').onchange = (event) => {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (file) void recognizeFile(file);

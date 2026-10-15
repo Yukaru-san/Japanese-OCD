@@ -36,7 +36,7 @@ const headers = [
     methods: promise([
       'isDeviceSupported', 'isOcrReady', 'checkPermissions', 'requestPermissions', 'startLiveRecognition',
       'stopLiveRecognition', 'captureFrame', 'resumeLiveRecognition', 'getLiveState', 'setTorch',
-      'setTranslation', 'recognizeImage', 'prepareTranslation', 'isTranslationReady', 'translateText',
+      'setTranslation', 'recognizeImage', 'recognizeFromGallery', 'prepareTranslation', 'isTranslationReady', 'translateText',
       'removeAllListeners',
     ]).concat([{ name: 'addListener', rtype: 'callback' }]),
   },
@@ -117,6 +117,19 @@ const browser = await chromium.launch();
   await page.click('#translate-result');
   await page.waitForFunction(() => document.getElementById('result-translation').value !== '');
   check('translateText on captured text', (await page.inputValue('#result-translation')).startsWith('[de]'));
+
+  // Gallery
+  await page.uncheck('#translate');
+  await page.fill('#result', '');
+  await page.click('#gallery');
+  await page.waitForFunction(() => document.getElementById('result').value !== '');
+  check('gallery image text reaches the web app', (await page.inputValue('#result')) === 'こんにちは、せかい\n日本語を勉強する');
+  check('gallery result lists glossary words', (await page.textContent('#result-words')).includes('せかい = Welt'));
+  check('gallery photo is shown', await page.evaluate(() => !document.getElementById('captured-image').hidden && document.getElementById('captured-image').src.includes('_capacitor_content_')));
+  await page.evaluate(() => { window.__fakeAndroid.pickerCancels = true; });
+  await page.click('#gallery');
+  await page.waitForFunction(() => document.getElementById('log').textContent.includes('Galerie: keine Auswahl'));
+  check('closing the picker is handled quietly', !(await page.textContent('#log')).split('\n')[0].includes('→'));
 
   // Error path: starting with translation for a language whose model is missing
   await page.selectOption('#language', 'en');

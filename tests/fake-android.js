@@ -121,6 +121,15 @@
       state.translation = saved;
       return r;
     },
+    recognizeFromGallery: (o) => {
+      if (state.pickerCancels) throw reject('No image was selected.', 'CANCELLED');
+      const saved = state.translation;
+      state.translation = o.translation && o.translation.enabled ? (o.translation.targetLanguage || 'en') : null;
+      const r = frame(false);
+      state.translation = saved;
+      r.imagePath = 'content://media/picker/0/com.android.providers.media.photopicker/media/1000000033';
+      return r;
+    },
     prepareTranslation: (o) => { state.models.add(o.targetLanguage || 'en'); },
     isTranslationReady: (o) => ({ ready: state.models.has(o.targetLanguage || 'en') }),
     translateText: (o) => {
