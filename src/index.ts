@@ -27,6 +27,7 @@ const ERROR_CODES: readonly JapaneseOcrErrorCode[] = [
   'RECOGNITION_FAILED',
   'TRANSLATION_NOT_READY',
   'TRANSLATION_FAILED',
+  'CANCELLED',
 ];
 
 /**

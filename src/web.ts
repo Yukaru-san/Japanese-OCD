@@ -3,6 +3,7 @@ import { CapacitorException, ExceptionCode, WebPlugin } from '@capacitor/core';
 import type {
   CaptureResult,
   DeviceSupportResult,
+  GalleryResult,
   JapaneseOcrPlugin,
   LiveState,
   OcrReadyResult,
@@ -65,6 +66,10 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrPlugin {
   }
 
   async recognizeImage(): Promise<OcrResult> {
+    throw this.unsupported();
+  }
+
+  async recognizeFromGallery(): Promise<GalleryResult> {
     throw this.unsupported();
   }
 

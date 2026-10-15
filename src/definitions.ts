@@ -25,7 +25,9 @@ export type JapaneseOcrErrorCode =
   /** The translation model for the target language is not downloaded. Call `prepareTranslation()`. */
   | 'TRANSLATION_NOT_READY'
   /** Translating the recognized text failed. */
-  | 'TRANSLATION_FAILED';
+  | 'TRANSLATION_FAILED'
+  /** The user closed the photo picker without choosing an image. */
+  | 'CANCELLED';
 
 /**
  * Shape of every error the plugin rejects with. Narrow a caught value with `isJapaneseOcrError()`.
@@ -186,6 +188,18 @@ export interface RecognizeImageOptions {
   translation?: TranslationOptions;
 }
 
+export interface GalleryOptions {
+  /** Translate the recognized text. */
+  translation?: TranslationOptions;
+}
+
+export interface GalleryResult extends OcrResult {
+  /**
+   * `content://` URI of the chosen image. Use `Capacitor.convertFileSrc()` to show it in an `<img>`.
+   */
+  imagePath: string;
+}
+
 export interface PrepareTranslationOptions {
   /**
    * BCP-47 code of the target language.
@@ -287,6 +301,12 @@ export interface JapaneseOcrPlugin {
    * Recognizes Japanese text in an existing image.
    */
   recognizeImage(options: RecognizeImageOptions): Promise<OcrResult>;
+
+  /**
+   * Lets the user pick an image from the gallery (system photo picker, no permission needed) and
+   * recognizes its Japanese text. Rejects with `CANCELLED` when the picker is closed.
+   */
+  recognizeFromGallery(options?: GalleryOptions): Promise<GalleryResult>;
 
   /**
    * Downloads the Japanese → target language model, if not on the device yet.

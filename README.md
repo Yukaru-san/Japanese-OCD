@@ -4,7 +4,7 @@ Japanese text recognition (OCR) for Capacitor apps, on the device, with Google M
 
 - **Live camera:** the camera preview runs behind your web page, recognized text arrives as events.
 - **Capture:** freeze the picture and get its text, optionally the photo as a file.
-- **Images:** recognize text in an existing image (file path or base64).
+- **Gallery & images:** let the user pick a photo from the gallery, or pass an image (file path or base64).
 - **Translation (optional):** Japanese → another language, on the device, switchable at any time.
 - **Positions:** every block, line and character comes with its position on screen, so you can draw your own
   highlights or buttons over recognized words.
@@ -166,6 +166,21 @@ const { text } = await JapaneseOcr.translateText({ text: 'こんにちは', targ
 Target languages are BCP-47 codes supported by ML Kit (`en`, `de`, `fr`, `es`, `ko`, `zh`, ...). Default: `en`.
 Using a language whose model is not downloaded throws `TRANSLATION_NOT_READY`.
 
+### Recognize a photo from the gallery
+
+```ts
+try {
+  const result = await JapaneseOcr.recognizeFromGallery(); // opens the system photo picker
+  output.textContent = result.text;
+  preview.src = Capacitor.convertFileSrc(result.imagePath); // show the chosen photo
+} catch (e) {
+  if (isJapaneseOcrError(e) && e.code === 'CANCELLED') return; // user closed the picker
+}
+```
+
+No permission is needed: Android's photo picker only hands over the image the user chose. The camera does not
+have to be running. Results have `boundingBox` but no `viewBoundingBox`, since the image is not on screen.
+
 ### Recognize an existing image
 
 ```ts
@@ -204,6 +219,7 @@ Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to
 | `RECOGNITION_FAILED`    | The image could not be loaded or recognized.                  |
 | `TRANSLATION_NOT_READY` | The translation model is not downloaded. Call `prepareTranslation()`. |
 | `TRANSLATION_FAILED`    | Translating failed.                                           |
+| `CANCELLED`             | The user closed the photo picker without choosing an image.   |
 
 ## API
 
@@ -222,6 +238,7 @@ All methods return Promises. Types are exported from the package.
 | `setTorch({ enabled })`                    | `void`                     |                                                          |
 | `setTranslation({ enabled, targetLanguage? })` | `void`                 |                                                          |
 | `recognizeImage({ path?, base64?, translation? })` | `OcrResult`        |                                                          |
+| `recognizeFromGallery({ translation? }?)`  | `GalleryResult`            | `OcrResult` plus `imagePath` (`content://`).            |
 | `prepareTranslation({ targetLanguage?, requireWifi? })` | `void`        | Downloads the model if needed.                           |
 | `isTranslationReady({ targetLanguage? })`  | `{ ready }`                | Never throws.                                            |
 | `findText(result, text)` (function)        | `TextMatch[]`              | Position of a word in a result. Not async.               |

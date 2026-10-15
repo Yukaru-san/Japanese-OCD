@@ -1,18 +1,23 @@
 package com.yukarusan.japaneseocr;
 
 import android.Manifest;
+import android.app.Activity;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.MediaStore;
 import android.util.Base64;
+import androidx.activity.result.ActivityResult;
 import androidx.annotation.Nullable;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
@@ -46,6 +51,7 @@ public class JapaneseOcrPlugin extends Plugin {
     private static final String RECOGNITION_FAILED = "RECOGNITION_FAILED";
     private static final String TRANSLATION_NOT_READY = "TRANSLATION_NOT_READY";
     private static final String TRANSLATION_FAILED = "TRANSLATION_FAILED";
+    private static final String CANCELLED = "CANCELLED";
 
     private static final int MIN_SDK = 24;
 
@@ -418,16 +424,8 @@ public class JapaneseOcrPlugin extends Plugin {
             return;
         }
 
-        String target = null;
-        JSObject translationOptions = call.getObject("translation");
-        if (translationOptions != null && translationOptions.getBoolean("enabled", false)) {
-            target = TranslationEngine.resolveTarget(translationOptions.getString("targetLanguage"));
-            if (target == null) {
-                call.reject("Unsupported targetLanguage.", INVALID_ARGUMENT);
-                return;
-            }
-        }
-        String translateTo = target;
+        String translateTo = translationTarget(call);
+        if (translateTo == null) return;
 
         worker.execute(() -> {
             InputImage image;
@@ -437,14 +435,75 @@ public class JapaneseOcrPlugin extends Plugin {
                 call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
                 return;
             }
-            recognize(image, translateTo, null).addOnCompleteListener((task) -> {
-                if (task.isSuccessful()) {
-                    call.resolve(task.getResult());
-                } else {
-                    Exception e = task.getException();
-                    call.reject(errorMessage(e, "Recognition failed"), codeOf(e));
-                }
-            });
+            resolveRecognition(call, image, translateTo, null);
+        });
+    }
+
+    /** Opens the system photo picker and recognizes the chosen image. */
+    @PluginMethod
+    public void recognizeFromGallery(PluginCall call) {
+        if (!ensureOcr(call)) return;
+        if (translationTarget(call) == null) return;
+
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= 33) {
+            intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+        } else {
+            intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+        }
+        intent.setType("image/*");
+        startActivityForResult(call, intent, "galleryResult");
+    }
+
+    @ActivityCallback
+    private void galleryResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        Intent data = result.getData();
+        Uri uri = result.getResultCode() == Activity.RESULT_OK && data != null ? data.getData() : null;
+        if (uri == null) {
+            call.reject("No image was selected.", CANCELLED);
+            return;
+        }
+        String translateTo = translationTarget(call);
+        if (translateTo == null) return;
+        worker.execute(() -> {
+            InputImage image;
+            try {
+                image = InputImage.fromFilePath(getContext(), uri);
+            } catch (Exception e) {
+                call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
+                return;
+            }
+            resolveRecognition(call, image, translateTo, uri.toString());
+        });
+    }
+
+    /**
+     * Reads `translation` from the call: the target language, "" when translation is off, or null
+     * after rejecting the call for an unsupported language.
+     */
+    @Nullable
+    private static String translationTarget(PluginCall call) {
+        JSObject options = call.getObject("translation");
+        if (options == null || !options.getBoolean("enabled", false)) return "";
+        String target = TranslationEngine.resolveTarget(options.getString("targetLanguage"));
+        if (target == null) {
+            call.reject("Unsupported targetLanguage.", INVALID_ARGUMENT);
+        }
+        return target;
+    }
+
+    private void resolveRecognition(PluginCall call, InputImage image, String translateTo, @Nullable String imagePath) {
+        recognize(image, translateTo.isEmpty() ? null : translateTo, null).addOnCompleteListener((task) -> {
+            if (task.isSuccessful()) {
+                JSObject result = task.getResult();
+                if (imagePath != null) result.put("imagePath", imagePath);
+                call.resolve(result);
+            } else {
+                Exception e = task.getException();
+                call.reject(errorMessage(e, "Recognition failed"), codeOf(e));
+            }
         });
     }
 
