@@ -188,6 +188,25 @@ const result = await JapaneseOcr.recognizeImage({ path: 'file:///…/photo.jpg' 
 const result2 = await JapaneseOcr.recognizeImage({ base64: 'data:image/jpeg;base64,…' });
 ```
 
+## Text order and furigana
+
+ML Kit finds text pieces in no particular order. The plugin puts them in reading order before returning them:
+
+- Horizontal text: top to bottom, left to right. Vertical text (`result.vertical`): columns right to left.
+- Lines that belong together become one paragraph (`blocks`), joined without line breaks, so
+  `result.text` reads like the original. A change in text size (title vs. body) or a clear gap starts a new paragraph.
+- Furigana (small kana over kanji) are taken out of `text` and returned in `result.furigana`, each with
+  the kanji it belongs to when found:
+
+```ts
+const result = await JapaneseOcr.recognizeFromGallery();
+result.text;     // "なぜ日本の学校では女子のポニーテールが禁止されていたの？\n2026-10-14\n日本の学校では、…"
+result.furigana; // [{ text: 'にほん', base: '日本', ... }, { text: 'がっこう', base: '学校', ... }, ...]
+```
+
+Text that is part of the image but not of the content (app buttons, badges, clock in a screenshot) is still
+recognized; crop the image if you only want the article.
+
 ## Behaviour you can rely on
 
 - **Ready state:** the recognizer starts loading when the app starts. You don't have to wait for it: calls made
@@ -252,10 +271,12 @@ All methods return Promises. Types are exported from the package.
 
 ```ts
 interface OcrResult {
-  text: string;              // all text, blocks separated by "\n"
+  text: string;              // all text in reading order, paragraphs separated by "\n", no furigana
   translatedText?: string;   // only with translation enabled
   targetLanguage?: string;
-  blocks: OcrBlock[];
+  blocks: OcrBlock[];        // paragraphs in reading order
+  furigana: OcrFurigana[];   // readings over kanji, not part of text
+  vertical: boolean;         // vertical writing detected
   imageWidth: number;        // size of the image that boundingBox refers to
   imageHeight: number;
 }
@@ -267,6 +288,7 @@ interface OcrBlock extends OcrGeometry { text: string; translatedText?: string; 
 interface OcrLine extends OcrGeometry { text: string; confidence: number; recognizedLanguage: string; elements: OcrElement[] }
 interface OcrElement extends OcrGeometry { text: string; confidence: number; symbols: OcrSymbol[] }
 interface OcrSymbol extends OcrGeometry { text: string; confidence: number } // one character
+interface OcrFurigana extends OcrGeometry { text: string; base?: string }    // e.g. { text: 'にほん', base: '日本' }
 
 interface OcrGeometry {
   boundingBox?: Rect;        // pixels of the recognized image

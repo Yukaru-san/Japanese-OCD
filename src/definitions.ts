@@ -109,6 +109,18 @@ export interface OcrLine extends OcrGeometry {
   elements: OcrElement[];
 }
 
+/**
+ * Furigana: small kana printed over (or, in vertical text, beside) kanji to show their reading.
+ * They are recognized separately and are not part of `text`.
+ */
+export interface OcrFurigana extends OcrGeometry {
+  /** The reading, e.g. `にほん`. */
+  text: string;
+  /** The characters it belongs to, e.g. `日本`, when they could be located. */
+  base?: string;
+}
+
+/** A paragraph: consecutive lines of the same text size, in reading order. */
 export interface OcrBlock extends OcrGeometry {
   text: string;
   /** Translation of this block. Only set when translation is enabled. */
@@ -118,13 +130,21 @@ export interface OcrBlock extends OcrGeometry {
 }
 
 export interface OcrResult {
-  /** All recognized text, blocks separated by a line break. */
+  /**
+   * All recognized text in reading order, without furigana. Paragraphs are separated by a line
+   * break; the lines within a paragraph are joined (Latin words with a space).
+   */
   text: string;
   /** Translation of all blocks, separated by a line break. Only set when translation is enabled. */
   translatedText?: string;
   /** Target language of `translatedText`. */
   targetLanguage?: string;
+  /** Paragraphs in reading order. */
   blocks: OcrBlock[];
+  /** Furigana found in the image, in reading order. */
+  furigana: OcrFurigana[];
+  /** `true` when the text is written vertically (columns right to left). */
+  vertical: boolean;
   /** Width of the (upright) image the coordinates refer to. */
   imageWidth: number;
   /** Height of the (upright) image the coordinates refer to. */
