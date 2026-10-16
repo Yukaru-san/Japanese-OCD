@@ -43,6 +43,29 @@ export interface JapaneseOcrError {
   message: string;
 }
 
+/**
+ * The OCR engine that runs: `native` is ML Kit on Android, `web` is PaddleOCR running in the
+ * WebView/browser (WebAssembly) with browser APIs only.
+ */
+export type OcrEngineName = 'native' | 'web';
+
+export interface EngineOptions {
+  /**
+   * `auto` uses the native engine where it exists (Android) and the web engine everywhere else.
+   * `web` makes the plugin behave like on a plain website, also inside the Android app.
+   */
+  engine: 'auto' | OcrEngineName;
+}
+
+export interface EngineState {
+  /** The choice made with `setEngine()`. */
+  engine: 'auto' | OcrEngineName;
+  /** The engine that answers calls now. */
+  active: OcrEngineName;
+  /** `true` when the native engine exists on this platform (Android). */
+  nativeAvailable: boolean;
+}
+
 export interface DeviceSupportResult {
   /** `true` when Japanese text recognition is available on this device. */
   supported: boolean;
@@ -54,6 +77,8 @@ export interface DeviceSupportResult {
   handwriting: boolean;
   /** Why the device is not (fully) supported. */
   reason?: string;
+  /** The engine that answered. */
+  engine?: OcrEngineName;
 }
 
 export interface OcrReadyResult {
@@ -425,4 +450,14 @@ export interface JapaneseOcrPlugin {
   ): Promise<PluginListenerHandle>;
 
   removeAllListeners(): Promise<void>;
+
+  /**
+   * Chooses the OCR engine. Switching stops a running live recognition of the previous engine.
+   * Listeners stay registered. Rejects with `UNAVAILABLE` for `native` where there is no native
+   * engine. The choice is not stored; set it again after an app start.
+   */
+  setEngine(options: EngineOptions): Promise<void>;
+
+  /** The chosen and the active engine. Never throws. */
+  getEngine(): Promise<EngineState>;
 }

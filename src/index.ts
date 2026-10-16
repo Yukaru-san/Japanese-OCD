@@ -1,15 +1,9 @@
-import { registerPlugin } from '@capacitor/core';
+import type { JapaneseOcrError, JapaneseOcrErrorCode } from './definitions';
+import { createJapaneseOcr } from './engine-switch';
 
-import type { JapaneseOcrError, JapaneseOcrErrorCode, JapaneseOcrPlugin } from './definitions';
-
-const loadUnsupported = () => import('./web').then((m) => new m.JapaneseOcrWeb());
-
-// Android is native. Web and iOS get the unsupported implementation, so
-// isDeviceSupported() answers instead of throwing "not implemented".
-const JapaneseOcr = registerPlugin<JapaneseOcrPlugin>('JapaneseOcr', {
-  web: loadUnsupported,
-  ios: loadUnsupported,
-});
+// Android runs the native ML Kit engine; the web engine (PaddleOCR in the browser) runs on the
+// web, on iOS, and on Android after setEngine({ engine: 'web' }).
+const JapaneseOcr = createJapaneseOcr();
 
 export * from './definitions';
 export { findText } from './find-text';
