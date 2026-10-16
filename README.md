@@ -144,10 +144,12 @@ const onText = await JapaneseOcr.addListener('textRecognized', (result) => {
 });
 const onError = await JapaneseOcr.addListener('liveRecognitionError', (e) => console.warn(e.code, e.message));
 
-await JapaneseOcr.startLiveRecognition({ lensFacing: 'back', intervalMs: 500 }); // both optional
+await JapaneseOcr.startLiveRecognition({ lensFacing: 'back', intervalMs: 300 }); // all optional
 
 await JapaneseOcr.setTorch({ enabled: true });                 // flash on (throws UNAVAILABLE without flash)
-const state = await JapaneseOcr.getLiveState();                // { running, frozen }
+await JapaneseOcr.focusAt({ x: event.clientX, y: event.clientY }); // tap to focus
+await JapaneseOcr.setZoom({ ratio: 2 });                       // bigger text, e.g. for small furigana
+const state = await JapaneseOcr.getLiveState();                // { running, frozen, zoom, minZoom, maxZoom }
 
 const photo = await JapaneseOcr.captureFrame({ saveImage: true }); // freezes the preview
 image.src = Capacitor.convertFileSrc(photo.imagePath!);        // the photo, with photo.text recognized in it
@@ -159,6 +161,33 @@ await onError.remove();
 ```
 
 The camera shows **behind** the page, see [Make the camera visible](#3-make-the-camera-visible).
+
+**Stable results.** `textRecognized` delivers results smoothed over several frames, so the text does not jump
+while the camera is held still: a paragraph appears once it was seen in two frames, a different reading of it
+(for example furigana read into the line in one frame) only replaces the shown one once it came twice in a row, a
+paragraph that is missing for one or two frames stays where it was, and position changes of a few pixels are
+ignored. Text the camera sees outside the visible preview is left out. Every block carries a `trackId` that stays
+the same while the paragraph is followed, so you can move your markers instead of recreating them (a marker that is
+recreated on every frame cannot be tapped reliably). Pass `stabilize: false` for the raw result of every frame;
+`LiveStabilizer` is exported if you want to smooth it yourself.
+
+```ts
+const markers = new Map<number, HTMLElement>();
+await JapaneseOcr.addListener('textRecognized', (result) => {
+  const seen = new Set<number>();
+  for (const block of result.blocks) {
+    if (block.trackId === undefined || !block.viewBoundingBox) continue;
+    seen.add(block.trackId);
+    const marker = markers.get(block.trackId) ?? createMarker(block.trackId); // your own element
+    markers.set(block.trackId, marker);
+    placeOver(marker, block.viewBoundingBox);
+  }
+  for (const [id, marker] of markers) if (!seen.has(id)) (marker.remove(), markers.delete(id));
+});
+```
+
+Tips for small text such as furigana: hold the camera so the text fills a good part of the picture, or use
+`setZoom()`; ML Kit needs roughly 16 pixels per character. Frames are analyzed in Full HD.
 
 ### Copy the text
 
@@ -418,7 +447,7 @@ The choice is not stored; call `setEngine()` again after the app starts if you w
 
 | Feature | Web engine |
 | --- | --- |
-| Live camera | `getUserMedia`. The video is placed full-screen behind the page (like the native preview); your page needs a transparent background where the camera should show. The plugin sets `background: transparent` on `html` and `body` while live recognition runs (class `japanese-ocr-live` on `<html>`). `lensFacing`, `intervalMs` and `viewBoundingBox` work as on Android. |
+| Live camera | `getUserMedia`. The video is placed full-screen behind the page (like the native preview); your page needs a transparent background where the camera should show. The plugin sets `background: transparent` on `html` and `body` while live recognition runs (class `japanese-ocr-live` on `<html>`). `lensFacing`, `intervalMs`, `stabilize` and `viewBoundingBox` work as on Android. `setZoom()` works where the browser supports the `zoom` constraint; `focusAt()` has no effect (the browser keeps focusing by itself). |
 | Camera permission | The browser's own prompt. `checkPermissions()` uses the Permissions API; `requestPermissions()` opens the camera briefly to ask. Needs HTTPS or `localhost`. |
 | Flash | `setTorch()` works where the browser supports the `torch` constraint (Chrome on Android); otherwise `UNAVAILABLE`. |
 | Capture | `saveImage: true` returns `imagePath` as a `blob:` URL; use it directly as `<img src>`. |
@@ -467,12 +496,14 @@ All methods return Promises. Types are exported from the package.
 | `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws. |
 | `isOcrReady()`                             | `{ ready, reason? }`       | Never throws. `reason` when loading failed.              |
 | `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
-| `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (500) }` |
+| `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (300), stabilize?: boolean (true) }` |
 | `stopLiveRecognition()`                    | `void`                     |                                                          |
 | `captureFrame(options?)`                   | `CaptureResult`            | `{ saveImage?: boolean }`. With `saveImage`, `imagePath` is a `file://` path; show it with `Capacitor.convertFileSrc()` (web engine: a `blob:` URL). |
 | `resumeLiveRecognition()`                  | `void`                     |                                                          |
-| `getLiveState()`                           | `{ running, frozen }`      |                                                          |
+| `getLiveState()`                           | `{ running, frozen, zoom?, minZoom?, maxZoom? }` |                                    |
 | `setTorch({ enabled })`                    | `void`                     |                                                          |
+| `focusAt({ x, y })`                        | `void`                     | CSS pixels in the WebView. Back to autofocus after 5 s. `UNAVAILABLE` if the camera cannot focus on a point. |
+| `setZoom({ ratio })`                       | `void`                     | Clamped to `minZoom`…`maxZoom`. `UNAVAILABLE` if the camera cannot zoom. |
 | `recognizeImage({ path?, base64?, selectRegion?, regions? })` | `OcrResult` | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes. |
 | `recognizeFromGallery({ selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating; web engine: `blob:`). |
 | `recognizeHandwriting({ strokes, width?, height?, preContext?, maxResults? })` | `{ text, candidates }` | `strokes: { points: { x, y, t? }[] }[]`; up to 5 `{ text, probability, score }`, best first. |
@@ -481,7 +512,7 @@ All methods return Promises. Types are exported from the package.
 | `findText(result, text)` (function)        | `TextMatch[]`              | Position of a word in a result. Not async.               |
 | `isJapaneseOcrError(e)` (function)         | `boolean`                  | Type guard for caught errors.                            |
 | `toRubyHtml(resultOrBlock)` (function)     | `string`                   | Escaped HTML with furigana as `<ruby>`. Not async.       |
-| `addListener('textRecognized', fn)`        | `PluginListenerHandle`     | `fn(result: OcrResult)` for every live frame.            |
+| `addListener('textRecognized', fn)`        | `PluginListenerHandle`     | `fn(result: OcrResult)` for every live frame, smoothed (see [Stable results](#live-camera)). |
 | `addListener('liveRecognitionError', fn)`  | `PluginListenerHandle`     | `fn({ code, message })` when a live frame fails.         |
 | `removeAllListeners()`                     | `void`                     |                                                          |
 
@@ -506,6 +537,7 @@ interface OcrBlock extends OcrGeometry {
   text: string; recognizedLanguage: string; lines: OcrLine[];
   segments: OcrSegment[];    // text split into pieces; pieces with furigana have a reading
   region?: number;           // index in result.regions
+  trackId?: number;          // live only: same paragraph across frames
 }
 interface OcrSegment { text: string; reading?: string } // e.g. { text: '日本', reading: 'にほん' }
 interface OcrLine extends OcrGeometry { text: string; confidence: number; recognizedLanguage: string; elements: OcrElement[] }
@@ -595,7 +627,8 @@ ML Kit, CameraX, Android UI         PaddleOCR on ONNX Runtime Web, getUserMedia,
 | `android/.../JapaneseOcrPlugin.java` | Android entry point. One `@PluginMethod` per API method: checks options, starts the work, resolves or rejects the call with an error code. |
 | `android/.../OcrEngine.java` | Wraps the ML Kit Japanese recognizer (with a warm-up at app start) and builds the result JSON. |
 | `android/.../ReadingOrder.java` | Reading order, paragraphs, furigana detection and pairing, regions. Plain Java, unit tested. |
-| `android/.../LiveCameraController.java` | CameraX: preview behind the WebView, frame analysis at the interval, freeze and full-resolution capture, torch. |
+| `android/.../LiveCameraController.java` | CameraX: preview behind the WebView, Full HD frame analysis at the interval, freeze and full-resolution capture, torch, zoom, tap to focus. |
+| `src/live-stabilizer.ts` | Smooths live results over frames (follows paragraphs, hysteresis for new readings, dead band), `trackId`. Tests: `npm test`. |
 | `android/.../ViewMapper.java` | Converts camera image pixels to CSS pixels of the WebView (`viewBoundingBox`). |
 | `android/.../RegionSelector.java` | The full-screen rotate-and-frame dialog (`selectRegion: true`). Texts in `res/values*/strings.xml`. |
 | `android/.../ImageFiles.java` | Paths, base64, decoding photos upright (EXIF) and at most 4096 px, saving JPEGs to the cache. |

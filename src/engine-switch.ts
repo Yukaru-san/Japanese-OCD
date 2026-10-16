@@ -1,7 +1,15 @@
 import { Capacitor, CapacitorException, registerPlugin } from '@capacitor/core';
 import type { ExceptionCode, PluginListenerHandle } from '@capacitor/core';
 
-import type { EngineOptions, EngineState, JapaneseOcrPlugin, OcrEngineName } from './definitions';
+import type {
+  EngineOptions,
+  EngineState,
+  JapaneseOcrPlugin,
+  LiveRecognitionOptions,
+  OcrEngineName,
+  OcrResult,
+} from './definitions';
+import { LiveStabilizer } from './live-stabilizer';
 import type { JapaneseOcrEngine, JapaneseOcrWeb } from './web';
 
 /** Every engine method, forwarded to the active engine. */
@@ -16,6 +24,8 @@ const METHODS = [
   'resumeLiveRecognition',
   'getLiveState',
   'setTorch',
+  'focusAt',
+  'setZoom',
   'recognizeImage',
   'recognizeFromGallery',
   'recognizeHandwriting',
@@ -59,15 +69,50 @@ export function createJapaneseOcr(): JapaneseOcrPlugin {
     return { ...result, engine };
   };
 
+  // Live results are smoothed per listener; every start, resume and stop begins afresh.
+  let stabilize = true;
+  const stabilizers = new Set<LiveStabilizer>();
+  const resetStabilizers = () => stabilizers.forEach((s) => s.reset());
+  const forward = plugin as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const start = forward.startLiveRecognition;
+  plugin.startLiveRecognition = async (options?: LiveRecognitionOptions) => {
+    resetStabilizers();
+    stabilize = options?.stabilize !== false;
+    await start(options);
+  };
+  for (const method of ['resumeLiveRecognition', 'stopLiveRecognition'] as const) {
+    const call = forward[method];
+    plugin[method] = async () => {
+      resetStabilizers();
+      return call();
+    };
+  }
+
   // Listeners are registered with both engines, so they keep working after a switch.
   plugin.addListener = async (eventName: string, listener: (data: unknown) => void): Promise<PluginListenerHandle> => {
+    let stabilizer: LiveStabilizer | null = null;
+    let deliver = listener;
+    if (eventName === 'textRecognized') {
+      const s = (stabilizer = new LiveStabilizer());
+      stabilizers.add(s);
+      deliver = (data) =>
+        listener(
+          stabilize ? s.push(data as OcrResult, { width: window.innerWidth, height: window.innerHeight }) : data,
+        );
+    }
     const handles: PluginListenerHandle[] = [];
-    if (native) handles.push(await native.addListener(eventName as 'textRecognized', listener));
-    handles.push(await (await loadWeb()).addListener(eventName, listener));
-    return { remove: async () => void (await Promise.all(handles.map((h) => h.remove()))) };
+    if (native) handles.push(await native.addListener(eventName as 'textRecognized', deliver));
+    handles.push(await (await loadWeb()).addListener(eventName, deliver));
+    return {
+      remove: async () => {
+        if (stabilizer) stabilizers.delete(stabilizer);
+        await Promise.all(handles.map((h) => h.remove()));
+      },
+    };
   };
 
   plugin.removeAllListeners = async () => {
+    stabilizers.clear();
     if (native) await native.removeAllListeners();
     if (web) await (await web).removeAllListeners();
   };

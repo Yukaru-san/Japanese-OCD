@@ -174,6 +174,11 @@ export interface OcrBlock extends OcrGeometry {
   segments: OcrSegment[];
   /** Index in `regions` of the region this block was selected from. Only set when regions were used. */
   region?: number;
+  /**
+   * Only on stabilized live results: stays the same while the camera follows the same paragraph
+   * from frame to frame. Use it as a key to move your own markers instead of recreating them.
+   */
+  trackId?: number;
 }
 
 export interface OcrResult {
@@ -217,11 +222,35 @@ export interface LiveRecognitionOptions {
    */
   lensFacing?: 'back' | 'front';
   /**
-   * Minimum time between two recognized frames in milliseconds.
+   * Minimum time between two recognized frames in milliseconds. Frames are never recognized
+   * faster than the recognizer can handle them, so a small value just means "as often as
+   * possible".
    *
-   * @default 500
+   * @default 300
    */
   intervalMs?: number;
+  /**
+   * Smooth the results over several frames before `textRecognized` fires: a paragraph only
+   * appears once it was seen in two frames, a new reading of it (e.g. with or without furigana)
+   * only replaces the old one once it was seen twice in a row, a paragraph missing for a frame or
+   * two stays, and small position changes are ignored. Each block gets a `trackId`. Text that is
+   * outside the visible preview is dropped. Set to `false` for the raw result of every frame.
+   *
+   * @default true
+   */
+  stabilize?: boolean;
+}
+
+export interface FocusOptions {
+  /** CSS pixels relative to the WebView, e.g. `event.clientX`. */
+  x: number;
+  /** CSS pixels relative to the WebView, e.g. `event.clientY`. */
+  y: number;
+}
+
+export interface ZoomOptions {
+  /** Zoom factor between `minZoom` and `maxZoom` of `getLiveState()`; 1 is no zoom. */
+  ratio: number;
 }
 
 export interface CaptureOptions {
@@ -268,6 +297,12 @@ export interface LiveState {
   running: boolean;
   /** `true` while the preview shows a frame frozen by `captureFrame()`. */
   frozen: boolean;
+  /** Current zoom factor; only set while running. */
+  zoom?: number;
+  /** Smallest zoom factor the camera supports; only set while running. */
+  minZoom?: number;
+  /** Largest zoom factor the camera supports; 1 when it cannot zoom. Only set while running. */
+  maxZoom?: number;
 }
 
 /** Payload of the `liveRecognitionError` event. Same shape as a thrown `JapaneseOcrError`. */
@@ -322,6 +357,19 @@ export interface JapaneseOcrPlugin {
   setTorch(options: { enabled: boolean }): Promise<void>;
 
   /**
+   * Focuses the camera on a point of the preview, e.g. where the user tapped. The camera goes
+   * back to continuous autofocus after a few seconds.
+   */
+  focusAt(options: FocusOptions): Promise<void>;
+
+  /**
+   * Zooms the camera while live recognition runs. Zooming in makes small text such as furigana
+   * larger in the picture, so it is recognized more reliably. The value is clamped to the range of
+   * `getLiveState()`. Rejects with `UNAVAILABLE` when the camera cannot zoom.
+   */
+  setZoom(options: ZoomOptions): Promise<void>;
+
+  /**
    * Recognizes Japanese text in an existing image.
    */
   recognizeImage(options: RecognizeImageOptions): Promise<OcrResult>;
@@ -354,7 +402,8 @@ export interface JapaneseOcrPlugin {
 
   /**
    * Fired for every analyzed live frame, also with an empty result (`text: ''`, no blocks) when no
-   * text is visible. Paused while the preview is frozen by `captureFrame()`.
+   * text is visible. Paused while the preview is frozen by `captureFrame()`. The result is
+   * smoothed over frames unless live recognition was started with `stabilize: false`.
    */
   addListener(eventName: 'textRecognized', listenerFunc: (result: OcrResult) => void): Promise<PluginListenerHandle>;
 

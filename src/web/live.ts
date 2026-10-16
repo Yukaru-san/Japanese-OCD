@@ -143,6 +143,24 @@ export class LiveCamera {
     return !!(track.getCapabilities() as { torch?: boolean }).torch;
   }
 
+  /** Zoom range of the camera; `maxZoom` is 1 when the browser cannot zoom it. */
+  zoomRange(): { zoom: number; minZoom: number; maxZoom: number } {
+    const track = this.track();
+    const range =
+      track && typeof track.getCapabilities === 'function'
+        ? (track.getCapabilities() as { zoom?: { min: number; max: number } }).zoom
+        : undefined;
+    if (!range) return { zoom: 1, minZoom: 1, maxZoom: 1 };
+    const zoom = (track!.getSettings() as { zoom?: number }).zoom ?? range.min;
+    return { zoom, minZoom: range.min, maxZoom: range.max };
+  }
+
+  async setZoom(ratio: number): Promise<void> {
+    const { minZoom, maxZoom } = this.zoomRange();
+    const zoom = Math.min(maxZoom, Math.max(minZoom, ratio));
+    await this.track()?.applyConstraints({ advanced: [{ zoom } as MediaTrackConstraintSet] });
+  }
+
   async setTorch(enabled: boolean): Promise<void> {
     await this.track()?.applyConstraints({ advanced: [{ torch: enabled } as MediaTrackConstraintSet] });
   }
