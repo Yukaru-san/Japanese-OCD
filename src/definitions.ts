@@ -78,6 +78,8 @@ export interface DeviceSupportResult {
 export interface OcrReadyResult {
   /** `true` once the Japanese recognizer is loaded and has processed a warm-up image. */
   ready: boolean;
+  /** Why the recognizer cannot load. Absent while it is still loading or once it is ready. */
+  reason?: string;
 }
 
 export interface PermissionStatus {

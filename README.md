@@ -123,7 +123,8 @@ const support = await JapaneseOcr.isDeviceSupported(); // never throws
 // { supported: true, liveCamera: true, handwriting: true, engine: 'native' }
 if (!support.supported) showMessage(support.reason);
 
-const { ready } = await JapaneseOcr.isOcrReady(); // false while the model is still loading; for display only
+const { ready, reason } = await JapaneseOcr.isOcrReady(); // false while the model is still loading; for display only
+// reason is set only when loading failed, e.g. 'Japanese text recognizer failed to load: ...'
 ```
 
 ### Camera permission
@@ -464,7 +465,7 @@ All methods return Promises. Types are exported from the package.
 | `setEngine({ engine })`                    | `void`                     | `'auto'`, `'native'` or `'web'`. See [Web engine](#web-engine). |
 | `getEngine()`                              | `{ engine, active, nativeAvailable }` | `active` is `'native'` or `'web'`.              |
 | `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws. |
-| `isOcrReady()`                             | `{ ready }`                | Never throws.                                            |
+| `isOcrReady()`                             | `{ ready, reason? }`       | Never throws. `reason` when loading failed.              |
 | `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
 | `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (500) }` |
 | `stopLiveRecognition()`                    | `void`                     |                                                          |
@@ -536,6 +537,18 @@ interface Point { x: number; y: number }
 - Release builds with R8/minify need no extra rules.
 - Library versions can be overridden in your app's `android/variables.gradle`: `cameraxVersion`,
   `mlkitTextRecognitionJapaneseVersion`, `mlkitDigitalInkVersion`.
+
+### Devices without Google Play Services
+
+Text recognition needs neither Google Play Services nor internet: the ML Kit model and its native library are
+inside your APK, so it works on GrapheneOS (with or without sandboxed Google Play), LineageOS without GApps,
+Huawei devices and with the app's network access turned off. `isDeviceSupported()` does not check for Play
+Services.
+
+Handwriting is the exception: its model (~20 MB) is not in the APK and is downloaded from Google once. It needs
+internet for that one download, but no Play Services. Offline and without the model, `prepareHandwriting()` and
+`recognizeHandwriting()` throw `HANDWRITING_NOT_READY` at once (they don't wait for a network), and
+`isHandwritingReady()` returns `false`. Once downloaded it works offline.
 
 ## Web engine details
 
