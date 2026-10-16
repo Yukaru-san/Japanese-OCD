@@ -1,5 +1,6 @@
 // Entry point of the test app. Each section of index.html has its own module; this file only
 // starts them in order. Engine first, so every later plugin call goes to the chosen engine.
+import { initDictionary } from './dictionary-demo';
 import { initImages } from './images';
 import { initInk } from './ink';
 import { initLive, initLiveListeners } from './live';
@@ -15,6 +16,7 @@ async function init(): Promise<void> {
   initLive();
   initImages();
   initResult();
+  initDictionary();
 
   await refreshStatus();
   // The recognizer warms up in the background; show when it becomes ready and how long it took.
