@@ -95,9 +95,14 @@
     <div id="word-layer"></div>
     <div id="word-popup" hidden></div>
 
+    <div id="focus-ring" hidden></div>
+
     <div id="live-overlay" hidden>
       <div id="live-words"></div>
       <div id="live-text"></div>
+      <label id="zoom-row" class="row" hidden>
+        Zoom <input id="zoom" type="range" step="0.1" /> <span id="zoom-value"></span>
+      </label>
       <div class="row">
         <button id="capture" class="primary">Festhalten</button>
         <button id="resume" hidden>Weiter</button>

@@ -111,7 +111,10 @@
       if (!state.running) throw reject('Live recognition is not running.', 'NOT_RUNNING');
       state.frozen = false;
     },
-    getLiveState: () => ({ running: state.running, frozen: state.frozen }),
+    getLiveState: () =>
+      state.running ? { running: true, frozen: state.frozen, zoom: state.zoom ?? 1, minZoom: 1, maxZoom: 10 } : { running: false, frozen: false },
+    setZoom: (o) => { if (!state.running) throw reject('Live recognition is not running.', 'NOT_RUNNING'); state.zoom = o.ratio; },
+    focusAt: (o) => { if (!state.running) throw reject('Live recognition is not running.', 'NOT_RUNNING'); state.focus = { x: o.x, y: o.y }; },
     setTorch: (o) => { if (!state.running) throw reject('Live recognition is not running.', 'NOT_RUNNING'); state.torch = o.enabled; },
     recognizeImage: (o) => {
       if (!o.path && !o.base64) throw reject('Either path or base64 is required.', 'INVALID_ARGUMENT');
