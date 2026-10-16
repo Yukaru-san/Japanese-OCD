@@ -26,8 +26,6 @@ import type { ViewMapper } from './web/result';
 /** The methods every engine implements; `setEngine`/`getEngine` belong to the switching wrapper. */
 export type JapaneseOcrEngine = Omit<JapaneseOcrPlugin, 'setEngine' | 'getEngine'>;
 
-type Engine = PaddleEngine;
-
 /** Rejection with one of the plugin's error codes, the same shape the native plugin rejects with. */
 function fail(code: JapaneseOcrErrorCode, message: string): CapacitorException {
   return new CapacitorException(message, code as ExceptionCode);
@@ -52,9 +50,15 @@ const STILL_MAX_SIDE = 1600;
  * Japanese OCR in the browser: PaddleOCR (PP-OCRv6) on ONNX Runtime Web, camera via
  * `getUserMedia`, photo picker via `<input type="file">`. Returns exactly the same result structure
  * as the Android engine.
+ *
+ * This class is the web counterpart of `JapaneseOcrPlugin.java`: it checks options and maps
+ * failures to the plugin's error codes. The work is done by the modules in `web/`, which are
+ * imported on first use so they stay out of the app's start-up bundle: `paddle.ts` (models),
+ * `result.ts` + `reading-order.ts` (result format), `image.ts`, `live.ts`, `region-selector.ts`
+ * and `handwriting.ts`.
  */
 export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
-  private engine: Promise<Engine> | null = null;
+  private engine: Promise<PaddleEngine> | null = null;
   private ready = false;
   private failure: string | null = null;
   private live: LiveCamera | null = null;
@@ -70,7 +74,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   }
 
   /** Loads the models once (in the background from the first support check). */
-  private load(): Promise<Engine> {
+  private load(): Promise<PaddleEngine> {
     if (!this.engine) {
       const reason = JapaneseOcrWeb.basicSupport();
       this.engine = reason
@@ -90,7 +94,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     return this.engine;
   }
 
-  private async ensureOcr(): Promise<Engine> {
+  private async ensureOcr(): Promise<PaddleEngine> {
     const reason = JapaneseOcrWeb.basicSupport();
     if (reason) throw fail('UNAVAILABLE', reason);
     try {
@@ -187,7 +191,13 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     }
   }
 
-  private async onFrame(engine: Engine, live: LiveCamera, frame: HTMLCanvasElement, view: ViewMapper): Promise<void> {
+  /** Recognizes one live frame and fires `textRecognized`, unless the camera stopped or froze meanwhile. */
+  private async onFrame(
+    engine: PaddleEngine,
+    live: LiveCamera,
+    frame: HTMLCanvasElement,
+    view: ViewMapper,
+  ): Promise<void> {
     let result: OcrResult;
     try {
       result = await this.recognizeCanvas(engine, frame, null, view, LIVE_MAX_SIDE);
@@ -195,7 +205,6 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
       if (this.live === live && !live.frozen) this.liveError('RECOGNITION_FAILED', messageOf(e, 'Recognition failed'));
       return;
     }
-    if (this.live !== live || live.frozen) return;
     if (this.live !== live || live.frozen) return;
     this.notifyListeners('textRecognized', result);
   }
@@ -370,7 +379,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
 
   /** Recognizes a still image. Failures carry an error code. */
   private async recognize(
-    engine: Engine,
+    engine: PaddleEngine,
     canvas: HTMLCanvasElement,
     regions: Rect[] | null,
     view: ViewMapper | null,
@@ -383,8 +392,9 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     }
   }
 
+  /** Finds and reads the text on the canvas and builds the result in reading order. */
   private async recognizeCanvas(
-    engine: Engine,
+    engine: PaddleEngine,
     canvas: HTMLCanvasElement,
     regions: Rect[] | null,
     view: ViewMapper | null,
@@ -433,7 +443,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   }
 
   /** The recognizer is bundled, so "downloading" the handwriting model means loading it. */
-  private async handwritingEngine(): Promise<Engine> {
+  private async handwritingEngine(): Promise<PaddleEngine> {
     const reason = JapaneseOcrWeb.basicSupport();
     if (reason) throw fail('UNAVAILABLE', reason);
     try {

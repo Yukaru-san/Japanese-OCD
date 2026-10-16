@@ -107,7 +107,57 @@ html.japanese-ocr-live ion-content {
 
 Hide the parts of your UI you don't want over the camera the same way.
 
-## Common tasks
+## Examples
+
+Short examples for every method. All of them assume:
+
+```ts
+import { Capacitor } from '@capacitor/core';
+import { JapaneseOcr, findText, isJapaneseOcrError, toRubyHtml } from 'capacitor-japanese-ocr';
+```
+
+### Check support and readiness
+
+```ts
+const support = await JapaneseOcr.isDeviceSupported(); // never throws
+// { supported: true, liveCamera: true, handwriting: true, engine: 'native' }
+if (!support.supported) showMessage(support.reason);
+
+const { ready } = await JapaneseOcr.isOcrReady(); // false while the model is still loading; for display only
+```
+
+### Camera permission
+
+`startLiveRecognition()` asks by itself. Use these only to ask earlier, e.g. on an onboarding screen:
+
+```ts
+const { camera } = await JapaneseOcr.checkPermissions(); // 'granted' | 'denied' | 'prompt' | ...
+if (camera !== 'granted') await JapaneseOcr.requestPermissions();
+```
+
+### Live camera
+
+```ts
+const onText = await JapaneseOcr.addListener('textRecognized', (result) => {
+  output.textContent = result.text; // fires for every analyzed frame, '' when no text is visible
+});
+const onError = await JapaneseOcr.addListener('liveRecognitionError', (e) => console.warn(e.code, e.message));
+
+await JapaneseOcr.startLiveRecognition({ lensFacing: 'back', intervalMs: 500 }); // both optional
+
+await JapaneseOcr.setTorch({ enabled: true });                 // flash on (throws UNAVAILABLE without flash)
+const state = await JapaneseOcr.getLiveState();                // { running, frozen }
+
+const photo = await JapaneseOcr.captureFrame({ saveImage: true }); // freezes the preview
+image.src = Capacitor.convertFileSrc(photo.imagePath!);        // the photo, with photo.text recognized in it
+await JapaneseOcr.resumeLiveRecognition();                     // unfreeze, events continue
+
+await JapaneseOcr.stopLiveRecognition();
+await onText.remove();                                         // or JapaneseOcr.removeAllListeners()
+await onError.remove();
+```
+
+The camera shows **behind** the page, see [Make the camera visible](#3-make-the-camera-visible).
 
 ### Copy the text
 
@@ -132,8 +182,6 @@ await Clipboard.write({ string: text });
 in CSS pixels relative to the WebView, so a `position: fixed` element at those values sits exactly on the word:
 
 ```ts
-import { JapaneseOcr, findText } from 'capacitor-japanese-ocr';
-
 const marker = document.querySelector<HTMLButtonElement>('#marker')!; // position: fixed; hidden by default
 marker.onclick = () => alert('せかい (sekai): Welt'); // your own explanation
 
@@ -165,11 +213,21 @@ try {
   preview.src = Capacitor.convertFileSrc(result.imagePath); // show the chosen photo
 } catch (e) {
   if (isJapaneseOcrError(e) && e.code === 'CANCELLED') return; // user closed the picker
+  throw e;
 }
 ```
 
 No permission is needed: Android's photo picker only hands over the image the user chose. The camera does not
 have to be running. Results have `boundingBox` but no `viewBoundingBox`, since the image is not on screen.
+
+### Recognize an existing image
+
+```ts
+const fromFile = await JapaneseOcr.recognizeImage({ path: 'file:///…/photo.jpg' }); // or content://…
+const fromData = await JapaneseOcr.recognizeImage({ base64: 'data:image/jpeg;base64,…' }); // prefix optional
+```
+
+In the browser (web engine), `path` is a URL the page can fetch; see [Web engine](#web-engine).
 
 ### Let the user frame the text they want
 
@@ -183,12 +241,23 @@ const result = await JapaneseOcr.recognizeFromGallery({ selectRegion: true });
 result.text;        // only the framed text
 result.regions;     // the frames, in image pixels
 result.blocks[0].region; // which frame a block came from
+result.rotation;    // 90, 180 or 270 when the user rotated the image
 ```
 
 `recognizeImage({ path, selectRegion: true })` works the same for an image you already have. With your own selection
 UI, pass the boxes instead: `recognizeImage({ path, regions: [{ left, top, right, bottom }] })` (pixels of the
 upright image). Cancelling the selection screen rejects with `CANCELLED`. The screen follows the device language
 (English, German, Japanese); override the `japanese_ocr_select_*` strings in your app's `strings.xml` to change it.
+
+### Show furigana as ruby
+
+```ts
+const result = await JapaneseOcr.recognizeFromGallery();
+element.innerHTML = toRubyHtml(result);         // <ruby>日本<rt>にほん</rt></ruby>の…, escaped
+element.innerHTML = toRubyHtml(result.blocks[0]); // or a single block
+```
+
+See [Text order and furigana](#text-order-and-furigana) for the data behind it.
 
 ### Recognize handwriting
 
@@ -202,6 +271,8 @@ const canvas = document.querySelector('canvas')!;
 const ctx = canvas.getContext('2d')!;
 const strokes: InkStroke[] = [];
 let timer: number | undefined;
+
+void JapaneseOcr.prepareHandwriting(); // optional: download the model before the first stroke
 
 canvas.style.touchAction = 'none'; // keep the page from scrolling while writing
 canvas.addEventListener('pointerdown', (e) => {
@@ -243,16 +314,30 @@ async function recognize(): Promise<void> {
 - **Probability** is relative to the returned candidates (they add up to 1), so it says how sure the recognizer is
   of the first candidate compared to the others. `score` is the recognizer's raw value (lower is better).
 - No strokes returns `{ text: '', candidates: [] }`. Coordinates can be in any unit; `width` and `height` in the
-  same unit help to tell small kana (っ, ゃ) from big ones.
+  same unit help to tell small kana (っ, ゃ) from big ones. `maxResults` (1 to 5) limits the candidates.
 
-### Recognize an existing image
+### Handle errors
 
 ```ts
-const result = await JapaneseOcr.recognizeImage({ path: 'file:///…/photo.jpg' }); // or content://…
-const result2 = await JapaneseOcr.recognizeImage({ base64: 'data:image/jpeg;base64,…' }); // prefix optional
+try {
+  await JapaneseOcr.startLiveRecognition();
+} catch (e) {
+  if (!isJapaneseOcrError(e)) throw e;
+  if (e.code === 'PERMISSION_DENIED') showMessage('Please allow the camera in the settings.');
+  else showMessage(`${e.code}: ${e.message}`);
+}
 ```
 
-In the browser (web engine), `path` is a URL the page can fetch; see [Web engine](#web-engine).
+All codes are listed under [Errors](#errors).
+
+### Switch the engine
+
+```ts
+await JapaneseOcr.setEngine({ engine: 'web' }); // 'auto' (default), 'native' or 'web'
+const { engine, active, nativeAvailable } = await JapaneseOcr.getEngine();
+```
+
+See [Web engine](#web-engine) for what changes.
 
 ## Text order and furigana
 
@@ -463,3 +548,123 @@ interface Point { x: number; y: number }
   configuration is needed.
 - For contributors: the plugin's own `npm run build` turns the models into the JavaScript chunks in
   `dist/esm/web/assets/`.
+
+## How it works
+
+This part is for people who want to read or change the plugin. Every method call takes the same way:
+
+```
+your app:  JapaneseOcr.recognizeImage({ ... })
+               │
+               ▼
+src/engine-switch.ts        picks the active engine ('auto' | 'native' | 'web')
+     │                                   │
+     ▼ Android                           ▼ web, iOS, or setEngine({ engine: 'web' })
+Capacitor bridge (JSON)             src/web.ts   (loaded on first use)
+     │                                   │
+     ▼                                   ▼
+JapaneseOcrPlugin.java              src/web/*.ts
+ML Kit, CameraX, Android UI         PaddleOCR on ONNX Runtime Web, getUserMedia, HTML UI
+     │                                   │
+     └──────────► the same OcrResult JSON ◄┘
+```
+
+### Files
+
+`android/.../` stands for `android/src/main/java/com/yukarusan/japaneseocr/`.
+
+| File | What happens there |
+| --- | --- |
+| `src/index.ts` | Package entry: creates `JapaneseOcr`, exports the types, `findText`, `toRubyHtml`, `isJapaneseOcrError`. |
+| `src/definitions.ts`, `src/handwriting.ts` | The public API: method signatures, options, result types, error codes. |
+| `src/engine-switch.ts` | Builds the `JapaneseOcr` object. Forwards each method to the native plugin or to the web engine, registers listeners with both, implements `setEngine` / `getEngine`. |
+| `src/find-text.ts`, `src/ruby.ts` | Plain helpers on a result: find a word and its box; render furigana as `<ruby>`. |
+| `android/.../JapaneseOcrPlugin.java` | Android entry point. One `@PluginMethod` per API method: checks options, starts the work, resolves or rejects the call with an error code. |
+| `android/.../OcrEngine.java` | Wraps the ML Kit Japanese recognizer (with a warm-up at app start) and builds the result JSON. |
+| `android/.../ReadingOrder.java` | Reading order, paragraphs, furigana detection and pairing, regions. Plain Java, unit tested. |
+| `android/.../LiveCameraController.java` | CameraX: preview behind the WebView, frame analysis at the interval, freeze and full-resolution capture, torch. |
+| `android/.../ViewMapper.java` | Converts camera image pixels to CSS pixels of the WebView (`viewBoundingBox`). |
+| `android/.../RegionSelector.java` | The full-screen rotate-and-frame dialog (`selectRegion: true`). Texts in `res/values*/strings.xml`. |
+| `android/.../ImageFiles.java` | Paths, base64, decoding photos upright (EXIF) and at most 4096 px, saving JPEGs to the cache. |
+| `android/.../HandwritingEngine.java`, `InkLines.java` | ML Kit Digital Ink; `InkLines` splits strokes into rows and combines the rows' candidates (plain Java, unit tested). |
+| `src/web.ts` | The web engine (`JapaneseOcrWeb`): the same methods and error codes as the Java plugin, built on the modules below. |
+| `src/web/paddle.ts` | Loads the bundled models and runs them: text detection, line recognition, CTC decoding, candidates. |
+| `src/web/result.ts` | Turns PaddleOCR lines into the same `OcrResult` as Android (same fields and key order). |
+| `src/web/reading-order.ts` | Line-by-line TypeScript port of `ReadingOrder.java`. Keep both in sync. |
+| `src/web/geometry.ts` | Convex hull and minimum-area rectangle for the detector's boxes. |
+| `src/web/image.ts`, `live.ts`, `region-selector.ts`, `handwriting.ts` | Browser versions of image loading, live camera, the selection screen and handwriting. |
+| `web-models/`, `scripts/` | The ONNX models and their character list; build scripts (see [Building](#building-and-testing)). |
+
+### Between JavaScript and Android
+
+Capacitor sends the call's options as JSON to the Java method with the same name (`PluginCall`). The Java
+side answers with `call.resolve(JSObject)`, which resolves the Promise in JS, or `call.reject(message, code)`,
+which rejects it with an error whose `code` is one of the [error codes](#errors). Live results don't belong to a
+call: Java sends them with `notifyListeners('textRecognized', result)` (and `liveRecognitionError`), which
+reaches every `addListener` callback. Images travel as paths (`file://`, `content://`) or base64, results as JSON.
+
+### Android: what happens on each call
+
+- **App start:** `load()` creates the ML Kit recognizer and runs a blank 64×64 image through it, so the model is
+  loaded before the first real call (`isOcrReady()` turns `true`).
+- **Live recognition:** after the permission check, `LiveCameraController` puts a CameraX
+  `PreviewView` behind the WebView, makes the WebView transparent and sets the `japanese-ocr-live` class on the
+  page. Frames (about 1280×720) go to ML Kit at most every `intervalMs`; a frame is skipped while the previous
+  one is still being processed. Each result is put in reading order, converted to JSON
+  with `ViewMapper` positions and sent as `textRecognized`.
+- **Capture:** the current preview picture is shown frozen on top of the preview, a full-resolution photo is
+  taken, turned upright, optionally saved to `cache/japanese-ocr/`, recognized and returned. Frames are not
+  analyzed until `resumeLiveRecognition()`.
+- **Still images:** `recognizeFromGallery` opens the system photo picker; `recognizeImage` opens a path or decodes
+  base64. On a worker thread the image is decoded; with `selectRegion` the `RegionSelector` dialog returns the
+  rotated image and the frames. Then the same recognition path as capture runs, limited to the regions.
+- **Handwriting:** strokes are grouped into rows written one below the other (`InkLines.rows`; flat rows such as
+  the bars of 三 stay with their characters). Each row is recognized by ML Kit with the text so far as context; the
+  rows' candidates are combined, best combinations first, and their scores turned into probabilities (softmax).
+
+### Web engine: what happens on each call
+
+- **Loading:** the first call imports `src/web.ts`; `paddle.ts` then imports the models and the WebAssembly runtime
+  (JavaScript chunks generated at build time), creates two ONNX sessions and runs a warm-up image.
+- **Recognition:** the image is scaled to at most 1600 px (960 px for live frames). The detection model returns a
+  text probability map; every connected area becomes a rotated box. Each box is cut out along its reading
+  direction (vertical columns are turned), scaled to 48 px height and read by the recognition model; CTC decoding
+  gives the text and where each character lies. Lines read with less than 50 % confidence are dropped.
+- **Result:** `result.ts` groups the characters into words, runs the reading order port and writes the same JSON
+  as `OcrEngine.java`.
+- **Live camera:** a `<video>` from `getUserMedia` fills the window behind the page; a frame is copied to a canvas
+  at each interval. `viewMapper()` converts camera pixels to page pixels for the `object-fit: cover` video.
+- **Handwriting:** each row of strokes is drawn black on white and read with the recognizer as a single line,
+  restricted to Japanese characters, with up to `maxResults` alternatives from a CTC beam search; rows are
+  combined like on Android.
+
+### Reading order and furigana
+
+`ReadingOrder.java` (and its port `reading-order.ts`) works on boxes only:
+
+1. **Direction:** the text is vertical when more lines are tall than wide.
+2. **Furigana:** a line of kana only is furigana when it is clearly thinner than the typical line (below 0.7 of
+   it), or thinner than the kanji line it sits on (below 0.8 of it, for headings with big furigana).
+3. **Order:** the other lines are sorted into rows top to bottom and left to right (vertical: columns right to
+   left, top to bottom).
+4. **Pairing:** each furigana line is split into one reading per word, and each reading is paired with the
+   nearest line below it (left of it in vertical text) and the kanji under its extent.
+5. **Paragraphs:** consecutive lines form a paragraph until the text size changes (more than 1.3×), the gap grows
+   (more than 1.5 lines) or the lines stop overlapping. With `regions`, only characters whose center lies in a
+   region are kept, region by region.
+6. **Positions:** each reading's kanji are located in the paragraph text (`block`, `start`, `end`), which gives
+   the block's `segments`.
+
+### Building and testing
+
+- `npm run build`: `tsc` compiles `src/` to `dist/esm/`; `scripts/embed-assets.mjs` writes the models, the
+  character list and ONNX Runtime Web into `dist/esm/web/assets/` as JavaScript modules; Rollup builds
+  `dist/plugin.js` (one file for `<script>` tags) and `dist/plugin.cjs.js` (CommonJS, web engine in `dist/cjs/`).
+  The Java sources are not compiled here; they ship as source and are built by the app's Gradle build.
+- `npm run lint` / `npm run fmt`: ESLint and Prettier (also for Java).
+- `cd android && ./gradlew test`: unit tests for `ReadingOrder` and `InkLines`; `./gradlew build lint` compiles
+  and checks the Android library. Both need the Android SDK and `npm install` (for `@capacitor/android`).
+- The models in `web-models/` are converted with `scripts/fp16-weights.py`; see
+  [web-models/README.md](web-models/README.md).
+- The test app on the [`test-app` branch](https://github.com/Yukaru-san/Japanese-OCD/tree/test-app) shows every
+  feature on a device and has browser tests against a simulated Android bridge.

@@ -185,7 +185,23 @@ export function arrange(lines: Line[], regions: Box[] | null = null): Layout {
     regions.forEach((region, r) => group(layout, lines, select(lines, main, region), r, vertical, size));
   }
 
-  // Locate every reading's base characters in the returned text.
+  placeReadings(layout, lines, readings, baseLine, baseGlyphs, regions);
+  return layout;
+}
+
+/**
+ * Locates every reading's base characters in the returned paragraphs and keeps the readings that
+ * belong to returned text. With regions, a reading without a base line is kept when it lies inside
+ * a region itself.
+ */
+function placeReadings(
+  layout: Layout,
+  lines: Line[],
+  readings: Ruby[],
+  baseLine: Map<Ruby, number>,
+  baseGlyphs: Map<Ruby, number[]>,
+  regions: Box[] | null,
+): void {
   for (const ruby of readings) {
     const line = baseLine.get(ruby);
     let placed = false;
@@ -198,7 +214,6 @@ export function arrange(lines: Line[], regions: Box[] | null = null): Layout {
       layout.ruby.push(ruby);
     }
   }
-  return layout;
 }
 
 /** Joins the lines of a paragraph. Japanese lines are joined directly, Latin words with a space. */
@@ -386,16 +401,15 @@ function place(
     }
     if (part.glyphs != null && !glyphs.every((g) => part.glyphs!.includes(g))) continue;
     const offsets = offsetsIn(paragraph, lines, part);
-    if (offsets == null) {
-      ruby.paragraph = index;
-      return true;
-    }
-    const first = offsets[glyphs[0]];
-    const last = offsets[glyphs[glyphs.length - 1]];
     ruby.paragraph = index;
+    if (offsets == null) return true;
+    const lastGlyph = glyphs[glyphs.length - 1];
+    const first = offsets[glyphs[0]];
+    const last = offsets[lastGlyph];
+    // Characters that could not be found in the text: the reading keeps its paragraph only.
     if (first < 0 || last < 0) return true;
     ruby.start = first;
-    ruby.end = last + lines[line].glyphs[glyphs[glyphs.length - 1]].text.length;
+    ruby.end = last + lines[line].glyphs[lastGlyph].text.length;
     return true;
   }
   return false;

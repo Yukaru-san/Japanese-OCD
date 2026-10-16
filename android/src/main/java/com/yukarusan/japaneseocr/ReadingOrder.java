@@ -240,7 +240,23 @@ final class ReadingOrder {
             }
         }
 
-        // Locate every reading's base characters in the returned text.
+        placeReadings(layout, lines, readings, baseLine, baseGlyphs, regions);
+        return layout;
+    }
+
+    /**
+     * Locates every reading's base characters in the returned paragraphs and keeps the readings
+     * that belong to returned text. With regions, a reading without a base line is kept when it
+     * lies inside a region itself.
+     */
+    private static void placeReadings(
+        Layout layout,
+        List<Line> lines,
+        List<Ruby> readings,
+        Map<Ruby, Integer> baseLine,
+        Map<Ruby, List<Integer>> baseGlyphs,
+        List<Box> regions
+    ) {
         for (Ruby ruby : readings) {
             Integer line = baseLine.get(ruby);
             boolean placed = false;
@@ -253,7 +269,6 @@ final class ReadingOrder {
                 layout.ruby.add(ruby);
             }
         }
-        return layout;
     }
 
     /** Joins the lines of a paragraph. Japanese lines are joined directly, Latin words with a space. */
@@ -436,24 +451,15 @@ final class ReadingOrder {
             }
             if (part.glyphs != null && !part.glyphs.containsAll(glyphs)) continue;
             int[] offsets = offsetsIn(paragraph, lines, part);
-            if (offsets == null) {
-                ruby.paragraph = index;
-                return true;
-            }
-            int first = offsets[glyphs.get(0)];
-            int last = offsets[glyphs.get(glyphs.size() - 1)];
-            if (first < 0 || last < 0) {
-                ruby.paragraph = index;
-                return true;
-            }
             ruby.paragraph = index;
+            if (offsets == null) return true;
+            int lastGlyph = glyphs.get(glyphs.size() - 1);
+            int first = offsets[glyphs.get(0)];
+            int last = offsets[lastGlyph];
+            // Characters that could not be found in the text: the reading keeps its paragraph only.
+            if (first < 0 || last < 0) return true;
             ruby.start = first;
-            ruby.end =
-                last +
-                lines
-                    .get(line)
-                    .glyphs.get(glyphs.get(glyphs.size() - 1))
-                    .text.length();
+            ruby.end = last + lines.get(line).glyphs.get(lastGlyph).text.length();
             return true;
         }
         return false;

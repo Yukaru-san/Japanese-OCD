@@ -136,30 +136,17 @@ class OcrEngine {
 
         int count = layout.paragraphs.size() + arranged.unboxed.size();
         for (int i = 0; i < count; i++) {
-            JSObject blockObj = new JSObject();
             JSArray lines = new JSArray();
+            JSObject blockObj;
             String paragraphText;
             if (i < layout.paragraphs.size()) {
                 ReadingOrder.Paragraph paragraph = layout.paragraphs.get(i);
                 paragraphText = paragraph.text;
-                Rect box = null;
-                for (ReadingOrder.Part part : paragraph.parts) {
-                    Text.Line line = arranged.lines.get(part.line);
-                    lines.put(lineToJson(line, part.glyphs, view));
-                    Rect partBox = new Rect(part.box.left, part.box.top, part.box.right, part.box.bottom);
-                    if (box == null) box = partBox;
-                    else box.union(partBox);
-                }
-                blockObj.put("recognizedLanguage", arranged.lines.get(paragraph.parts.get(0).line).getRecognizedLanguage());
-                putGeometry(blockObj, box, box == null ? null : corners(box), view);
-                if (paragraph.region >= 0) blockObj.put("region", paragraph.region);
-                blockObj.put("segments", segmentsToJson(ReadingOrder.segments(paragraph.text, layout.ruby, i)));
+                blockObj = paragraphBlock(arranged, paragraph, i, lines, view);
             } else {
                 Text.Line line = arranged.unboxed.get(i - layout.paragraphs.size());
                 paragraphText = line.getText();
-                blockObj.put("recognizedLanguage", line.getRecognizedLanguage());
-                lines.put(lineToJson(line, null, view));
-                blockObj.put("segments", segmentsToJson(Collections.singletonList(new ReadingOrder.Segment(paragraphText, null))));
+                blockObj = unboxedBlock(line, lines, view);
             }
             blockObj.put("text", paragraphText);
             blockObj.put("lines", lines);
@@ -169,29 +156,68 @@ class OcrEngine {
             allText.append(paragraphText);
         }
 
-        JSArray furigana = new JSArray();
-        for (ReadingOrder.Ruby ruby : layout.ruby) {
-            JSObject reading = new JSObject();
-            reading.put("text", ruby.reading);
-            if (ruby.base != null) reading.put("base", ruby.base);
-            if (ruby.paragraph >= 0) reading.put("block", ruby.paragraph);
-            if (ruby.start >= 0) {
-                reading.put("start", ruby.start);
-                reading.put("end", ruby.end);
-            }
-            Rect box = new Rect(ruby.left, ruby.top, ruby.right, ruby.bottom);
-            putGeometry(reading, box, corners(box), view);
-            furigana.put(reading);
-        }
-
         JSObject result = new JSObject();
         result.put("text", allText.toString());
         result.put("blocks", blocks);
-        result.put("furigana", furigana);
+        result.put("furigana", furiganaToJson(layout.ruby, view));
         result.put("vertical", layout.vertical);
         result.put("imageWidth", imageWidth);
         result.put("imageHeight", imageHeight);
         return result;
+    }
+
+    /**
+     * Starts the JS block of a paragraph (language, geometry, region, segments) and adds its lines
+     * to {@code lines}. Text and lines are added by the caller.
+     */
+    private static JSObject paragraphBlock(
+        Arranged arranged,
+        ReadingOrder.Paragraph paragraph,
+        int index,
+        JSArray lines,
+        @Nullable ViewMapper view
+    ) {
+        JSObject blockObj = new JSObject();
+        Rect box = null;
+        for (ReadingOrder.Part part : paragraph.parts) {
+            Text.Line line = arranged.lines.get(part.line);
+            lines.put(lineToJson(line, part.glyphs, view));
+            Rect partBox = new Rect(part.box.left, part.box.top, part.box.right, part.box.bottom);
+            if (box == null) box = partBox;
+            else box.union(partBox);
+        }
+        blockObj.put("recognizedLanguage", arranged.lines.get(paragraph.parts.get(0).line).getRecognizedLanguage());
+        putGeometry(blockObj, box, box == null ? null : corners(box), view);
+        if (paragraph.region >= 0) blockObj.put("region", paragraph.region);
+        blockObj.put("segments", segmentsToJson(ReadingOrder.segments(paragraph.text, arranged.layout.ruby, index)));
+        return blockObj;
+    }
+
+    /** Same as {@link #paragraphBlock} for a line ML Kit returned without a box: a block of its own. */
+    private static JSObject unboxedBlock(Text.Line line, JSArray lines, @Nullable ViewMapper view) {
+        JSObject blockObj = new JSObject();
+        blockObj.put("recognizedLanguage", line.getRecognizedLanguage());
+        lines.put(lineToJson(line, null, view));
+        blockObj.put("segments", segmentsToJson(Collections.singletonList(new ReadingOrder.Segment(line.getText(), null))));
+        return blockObj;
+    }
+
+    private static JSArray furiganaToJson(List<ReadingOrder.Ruby> ruby, @Nullable ViewMapper view) {
+        JSArray furigana = new JSArray();
+        for (ReadingOrder.Ruby r : ruby) {
+            JSObject reading = new JSObject();
+            reading.put("text", r.reading);
+            if (r.base != null) reading.put("base", r.base);
+            if (r.paragraph >= 0) reading.put("block", r.paragraph);
+            if (r.start >= 0) {
+                reading.put("start", r.start);
+                reading.put("end", r.end);
+            }
+            Rect box = new Rect(r.left, r.top, r.right, r.bottom);
+            putGeometry(reading, box, corners(box), view);
+            furigana.put(reading);
+        }
+        return furigana;
     }
 
     private static JSArray segmentsToJson(List<ReadingOrder.Segment> segments) {

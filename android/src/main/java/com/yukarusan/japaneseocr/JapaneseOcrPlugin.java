@@ -5,14 +5,10 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Matrix;
 import android.graphics.Rect;
-import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.MediaStore;
-import android.util.Base64;
 import androidx.activity.result.ActivityResult;
 import androidx.annotation.Nullable;
 import com.getcapacitor.JSArray;
@@ -30,10 +26,7 @@ import com.google.android.gms.tasks.Tasks;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
 import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -42,6 +35,18 @@ import java.util.concurrent.Executors;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+/**
+ * The Capacitor entry point on Android: every {@code @PluginMethod} here is a method of
+ * {@code JapaneseOcr} in JS. This class only checks the call's options, picks the engine for the
+ * job and turns its outcome into a resolved or rejected call:
+ *
+ * <ul>
+ *   <li>{@link OcrEngine}: ML Kit text recognition and the JS result format</li>
+ *   <li>{@link LiveCameraController}: camera preview behind the WebView, live frames, capture</li>
+ *   <li>{@link RegionSelector}: the rotate-and-frame screen for still images</li>
+ *   <li>{@link HandwritingEngine}: ML Kit digital ink (handwriting)</li>
+ * </ul>
+ */
 @CapacitorPlugin(
     name = "JapaneseOcr",
     permissions = { @Permission(alias = JapaneseOcrPlugin.CAMERA, strings = { Manifest.permission.CAMERA }) }
@@ -50,6 +55,7 @@ public class JapaneseOcrPlugin extends Plugin {
 
     static final String CAMERA = "camera";
 
+    // Error codes, see JapaneseOcrErrorCode in src/definitions.ts.
     private static final String UNAVAILABLE = "UNAVAILABLE";
     private static final String NOT_READY = "NOT_READY";
     private static final String PERMISSION_DENIED = "PERMISSION_DENIED";
@@ -62,20 +68,25 @@ public class JapaneseOcrPlugin extends Plugin {
     private static final String HANDWRITING_NOT_READY = "HANDWRITING_NOT_READY";
 
     private static final int MIN_SDK = 24;
+    private static final String MIN_SDK_MESSAGE = "Android " + MIN_SDK + " (API level) or newer is required.";
 
     private final OcrEngine ocr = new OcrEngine();
     private final HandwritingEngine handwriting = new HandwritingEngine();
+
+    /** Decodes still images off the main thread. */
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
     @Nullable
     private LiveCameraController live;
 
+    /** The captureFrame() call waiting for its photo, so stopLiveRecognition() can reject it. */
     @Nullable
     private PluginCall pendingCapture;
 
     @Override
     public void load() {
-        if (Build.VERSION.SDK_INT >= MIN_SDK) {
+        // Start loading the recognizer with the app, so the first call doesn't wait for it.
+        if (isSdkSupported()) {
             ocr.initialize();
         }
     }
@@ -90,10 +101,14 @@ public class JapaneseOcrPlugin extends Plugin {
 
     // Support checks
 
+    private static boolean isSdkSupported() {
+        return Build.VERSION.SDK_INT >= MIN_SDK;
+    }
+
     @Nullable
     private String unsupportedReason() {
-        if (Build.VERSION.SDK_INT < MIN_SDK) {
-            return "Android " + MIN_SDK + " (API level) or newer is required.";
+        if (!isSdkSupported()) {
+            return MIN_SDK_MESSAGE;
         }
         if (!ocr.isUsable()) {
             String failure = ocr.getFailure();
@@ -117,23 +132,21 @@ public class JapaneseOcrPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("supported", supported);
         result.put("liveCamera", camera);
-        result.put("handwriting", Build.VERSION.SDK_INT >= MIN_SDK);
+        result.put("handwriting", isSdkSupported());
         if (reason != null) result.put("reason", reason);
         call.resolve(result);
     }
 
     @PluginMethod
     public void isOcrReady(PluginCall call) {
-        JSObject result = new JSObject();
-        result.put("ready", ocr.isReady());
-        call.resolve(result);
+        call.resolve(readyResult(ocr.isReady()));
     }
 
     /** Rejects the call and returns false when OCR cannot run. */
     private boolean ensureOcr(PluginCall call) {
         String reason = unsupportedReason();
         if (reason != null) {
-            call.reject(reason, Build.VERSION.SDK_INT < MIN_SDK ? UNAVAILABLE : NOT_READY);
+            call.reject(reason, isSdkSupported() ? NOT_READY : UNAVAILABLE);
             return false;
         }
         return true;
@@ -188,6 +201,7 @@ public class JapaneseOcrPlugin extends Plugin {
         });
     }
 
+    /** Turns every analyzed camera frame into a `textRecognized` event. */
     private final LiveCameraController.FrameListener frameListener = new LiveCameraController.FrameListener() {
         @Override
         public void onFrame(Text text, int imageWidth, int imageHeight, @Nullable ViewMapper view, Runnable done) {
@@ -242,26 +256,7 @@ public class JapaneseOcrPlugin extends Plugin {
                 new LiveCameraController.CaptureCallback() {
                     @Override
                     public void onCaptured(Bitmap bitmap, @Nullable ViewMapper view) {
-                        String imagePath = null;
-                        if (saveImage) {
-                            try {
-                                imagePath = saveJpeg(bitmap, "capture");
-                            } catch (IOException e) {
-                                finishCapture(call, null, "Could not save the image: " + e.getMessage(), CAMERA_ERROR);
-                                return;
-                            }
-                        }
-                        String path = imagePath;
-                        recognize(InputImage.fromBitmap(bitmap, 0), view, null).addOnCompleteListener((task) -> {
-                            if (!task.isSuccessful()) {
-                                Exception e = task.getException();
-                                finishCapture(call, null, errorMessage(e, "Recognition failed"), codeOf(e));
-                                return;
-                            }
-                            JSObject result = task.getResult();
-                            if (path != null) result.put("imagePath", path);
-                            finishCapture(call, result, null, null);
-                        });
+                        recognizeCapture(call, bitmap, saveImage, view);
                     }
 
                     @Override
@@ -270,6 +265,30 @@ public class JapaneseOcrPlugin extends Plugin {
                     }
                 }
             );
+        });
+    }
+
+    /** Runs on the capture thread: optionally saves the photo, then recognizes it. */
+    private void recognizeCapture(PluginCall call, Bitmap bitmap, boolean saveImage, @Nullable ViewMapper view) {
+        String imagePath = null;
+        if (saveImage) {
+            try {
+                imagePath = ImageFiles.saveJpeg(getContext(), bitmap, "capture");
+            } catch (IOException e) {
+                finishCapture(call, null, "Could not save the image: " + e.getMessage(), CAMERA_ERROR);
+                return;
+            }
+        }
+        String path = imagePath;
+        recognize(InputImage.fromBitmap(bitmap, 0), view, null).addOnCompleteListener((task) -> {
+            if (!task.isSuccessful()) {
+                Exception e = task.getException();
+                finishCapture(call, null, errorMessage(e, "Recognition failed"), codeOf(e));
+                return;
+            }
+            JSObject result = task.getResult();
+            if (path != null) result.put("imagePath", path);
+            finishCapture(call, result, null, null);
         });
     }
 
@@ -283,18 +302,6 @@ public class JapaneseOcrPlugin extends Plugin {
                 call.reject(error, code);
             }
         });
-    }
-
-    private String saveJpeg(Bitmap bitmap, String prefix) throws IOException {
-        File dir = new File(getContext().getCacheDir(), "japanese-ocr");
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw new IOException("Cannot create " + dir);
-        }
-        File file = new File(dir, prefix + "-" + System.currentTimeMillis() + ".jpg");
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out);
-        }
-        return Uri.fromFile(file).toString();
     }
 
     @PluginMethod
@@ -347,12 +354,12 @@ public class JapaneseOcrPlugin extends Plugin {
         String path = call.getString("path");
         String base64 = call.getString("base64");
         if (path != null && !path.isEmpty()) {
-            Uri uri = toUri(path);
-            recognizeStill(call, () -> open(uri), uri, path);
+            Uri uri = ImageFiles.toUri(path);
+            recognizeStill(call, () -> ImageFiles.open(getContext(), uri), uri, path);
         } else if (base64 != null && !base64.isEmpty()) {
             byte[] bytes;
             try {
-                bytes = decodeBase64(base64);
+                bytes = ImageFiles.decodeBase64(base64);
             } catch (IllegalArgumentException e) {
                 call.reject("base64 is not valid: " + e.getMessage(), INVALID_ARGUMENT);
                 return;
@@ -366,6 +373,7 @@ public class JapaneseOcrPlugin extends Plugin {
     /** Opens the system photo picker and recognizes the chosen image. */
     @PluginMethod
     public void recognizeFromGallery(PluginCall call) {
+        // Check the options before the picker opens, so mistakes don't cost the user a pick.
         if (!ensureOcr(call)) return;
         if (regionsOf(call) == INVALID_REGIONS) return;
 
@@ -389,17 +397,7 @@ public class JapaneseOcrPlugin extends Plugin {
             call.reject("No image was selected.", CANCELLED);
             return;
         }
-        recognizeStill(call, () -> open(uri), uri, uri.toString());
-    }
-
-    private interface ImageSource {
-        InputStream open() throws IOException;
-    }
-
-    private InputStream open(Uri uri) throws IOException {
-        InputStream in = getContext().getContentResolver().openInputStream(uri);
-        if (in == null) throw new IOException("Cannot open " + uri);
-        return in;
+        recognizeStill(call, () -> ImageFiles.open(getContext(), uri), uri, uri.toString());
     }
 
     /**
@@ -409,64 +407,68 @@ public class JapaneseOcrPlugin extends Plugin {
      * @param uri where ML Kit can read the image directly, or null to decode it from {@code source}
      * @param imagePath returned as {@code imagePath}, or null
      */
-    private void recognizeStill(PluginCall call, ImageSource source, @Nullable Uri uri, @Nullable String imagePath) {
+    private void recognizeStill(PluginCall call, ImageFiles.Source source, @Nullable Uri uri, @Nullable String imagePath) {
         List<ReadingOrder.Box> regions = regionsOf(call);
         if (regions == INVALID_REGIONS) return;
         boolean select = Boolean.TRUE.equals(call.getBoolean("selectRegion", false));
 
         worker.execute(() -> {
-            if (!select) {
-                InputImage image;
-                try {
-                    image = uri != null ? InputImage.fromFilePath(getContext(), uri) : InputImage.fromBitmap(loadBitmap(source), 0);
-                } catch (Exception e) {
-                    call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
-                    return;
-                }
-                resolveRecognition(call, image, imagePath, regions, 0);
+            if (select) {
+                selectThenRecognize(call, source, imagePath);
                 return;
             }
-
-            Bitmap bitmap;
+            InputImage image;
             try {
-                bitmap = loadBitmap(source);
+                image = uri != null ? InputImage.fromFilePath(getContext(), uri) : InputImage.fromBitmap(ImageFiles.loadBitmap(source), 0);
             } catch (Exception e) {
                 call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
                 return;
             }
-            getActivity().runOnUiThread(() ->
-                RegionSelector.show(
-                    getActivity(),
-                    bitmap,
-                    new RegionSelector.Listener() {
-                        @Override
-                        public void onSelected(Bitmap image, int rotation, List<Rect> rects) {
-                            worker.execute(() -> {
-                                List<ReadingOrder.Box> selected = null;
-                                if (!rects.isEmpty()) {
-                                    selected = new ArrayList<>();
-                                    for (Rect r : rects) selected.add(new ReadingOrder.Box(r.left, r.top, r.right, r.bottom));
-                                }
-                                String path = imagePath;
-                                if (rotation != 0) {
-                                    try {
-                                        path = saveJpeg(image, "edited");
-                                    } catch (IOException e) {
-                                        // Keep the original; the coordinates then refer to the rotated image.
-                                    }
-                                }
-                                resolveRecognition(call, InputImage.fromBitmap(image, 0), path, selected, rotation);
-                            });
-                        }
-
-                        @Override
-                        public void onCancelled() {
-                            call.reject("The selection was cancelled.", CANCELLED);
-                        }
-                    }
-                )
-            );
+            resolveRecognition(call, image, imagePath, regions, 0);
         });
+    }
+
+    /** Runs on the worker: decodes the image, shows the selection screen, then recognizes what the user framed. */
+    private void selectThenRecognize(PluginCall call, ImageFiles.Source source, @Nullable String imagePath) {
+        Bitmap bitmap;
+        try {
+            bitmap = ImageFiles.loadBitmap(source);
+        } catch (Exception e) {
+            call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
+            return;
+        }
+        getActivity().runOnUiThread(() ->
+            RegionSelector.show(
+                getActivity(),
+                bitmap,
+                new RegionSelector.Listener() {
+                    @Override
+                    public void onSelected(Bitmap image, int rotation, List<Rect> rects) {
+                        worker.execute(() -> {
+                            List<ReadingOrder.Box> selected = null;
+                            if (!rects.isEmpty()) {
+                                selected = new ArrayList<>();
+                                for (Rect r : rects) selected.add(new ReadingOrder.Box(r.left, r.top, r.right, r.bottom));
+                            }
+                            String path = imagePath;
+                            if (rotation != 0) {
+                                try {
+                                    path = ImageFiles.saveJpeg(getContext(), image, "edited");
+                                } catch (IOException e) {
+                                    // Keep the original; the coordinates then refer to the rotated image.
+                                }
+                            }
+                            resolveRecognition(call, InputImage.fromBitmap(image, 0), path, selected, rotation);
+                        });
+                    }
+
+                    @Override
+                    public void onCancelled() {
+                        call.reject("The selection was cancelled.", CANCELLED);
+                    }
+                }
+            )
+        );
     }
 
     /** Marker returned by {@link #regionsOf} after rejecting the call. */
@@ -495,6 +497,7 @@ public class JapaneseOcrPlugin extends Plugin {
         return result.isEmpty() ? null : result;
     }
 
+    /** Recognizes a still image and resolves the call with the result, its image path, regions and rotation. */
     private void resolveRecognition(
         PluginCall call,
         InputImage image,
@@ -503,80 +506,36 @@ public class JapaneseOcrPlugin extends Plugin {
         int rotation
     ) {
         recognize(image, null, regions).addOnCompleteListener((task) -> {
-            if (task.isSuccessful()) {
-                JSObject result = task.getResult();
-                if (imagePath != null) result.put("imagePath", imagePath);
-                if (regions != null) {
-                    JSArray list = new JSArray();
-                    for (ReadingOrder.Box box : regions) {
-                        JSObject r = new JSObject();
-                        r.put("left", box.left);
-                        r.put("top", box.top);
-                        r.put("right", box.right);
-                        r.put("bottom", box.bottom);
-                        list.put(r);
-                    }
-                    result.put("regions", list);
-                }
-                if (rotation != 0) result.put("rotation", rotation);
-                call.resolve(result);
-            } else {
+            if (!task.isSuccessful()) {
                 Exception e = task.getException();
                 call.reject(errorMessage(e, "Recognition failed"), codeOf(e));
+                return;
             }
+            JSObject result = task.getResult();
+            if (imagePath != null) result.put("imagePath", imagePath);
+            if (regions != null) result.put("regions", regionsToJson(regions));
+            if (rotation != 0) result.put("rotation", rotation);
+            call.resolve(result);
         });
     }
 
-    private static Uri toUri(String path) {
-        if (path.startsWith("/")) {
-            return Uri.fromFile(new File(path));
+    private static JSArray regionsToJson(List<ReadingOrder.Box> regions) {
+        JSArray list = new JSArray();
+        for (ReadingOrder.Box box : regions) {
+            JSObject r = new JSObject();
+            r.put("left", box.left);
+            r.put("top", box.top);
+            r.put("right", box.right);
+            r.put("bottom", box.bottom);
+            list.put(r);
         }
-        return Uri.parse(path);
+        return list;
     }
 
-    private static byte[] decodeBase64(String base64) {
-        int comma = base64.indexOf(',');
-        String data = base64.startsWith("data:") && comma >= 0 ? base64.substring(comma + 1) : base64;
-        return Base64.decode(data, Base64.DEFAULT);
-    }
-
-    /** Images are scaled down by powers of two until their longer side fits. */
-    private static final int MAX_IMAGE_SIDE = 4096;
-
-    /** Decodes an image upright (EXIF orientation applied) and not larger than {@link #MAX_IMAGE_SIDE}. */
-    private static Bitmap loadBitmap(ImageSource source) throws IOException {
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        try (InputStream in = source.open()) {
-            BitmapFactory.decodeStream(in, null, bounds);
-        }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new IOException("not a decodable image");
-
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inSampleSize = 1;
-        while (Math.max(bounds.outWidth, bounds.outHeight) / options.inSampleSize > MAX_IMAGE_SIDE) options.inSampleSize *= 2;
-        Bitmap bitmap;
-        try (InputStream in = source.open()) {
-            bitmap = BitmapFactory.decodeStream(in, null, options);
-        }
-        if (bitmap == null) throw new IOException("not a decodable image");
-
-        int degrees = 0;
-        try (InputStream in = source.open()) {
-            int orientation = new ExifInterface(in).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
-            if (orientation == ExifInterface.ORIENTATION_ROTATE_90) degrees = 90;
-            else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) degrees = 180;
-            else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) degrees = 270;
-        } catch (IOException ignored) {
-            // No EXIF data: keep the image as decoded.
-        }
-        if (degrees == 0) return bitmap;
-        Matrix matrix = new Matrix();
-        matrix.postRotate(degrees);
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
-    }
-
-    /** Recognizes an image. Failures carry an error code. */
+    /**
+     * The common path of capture and still images: recognize and put the text in reading order.
+     * Failures carry an error code ({@link CodedException}).
+     */
     private Task<JSObject> recognize(InputImage image, @Nullable ViewMapper view, @Nullable List<ReadingOrder.Box> regions) {
         int width = image.getRotationDegrees() % 180 == 0 ? image.getWidth() : image.getHeight();
         int height = image.getRotationDegrees() % 180 == 0 ? image.getHeight() : image.getWidth();
@@ -595,23 +554,19 @@ public class JapaneseOcrPlugin extends Plugin {
 
     @PluginMethod
     public void isHandwritingReady(PluginCall call) {
-        if (Build.VERSION.SDK_INT < MIN_SDK) {
-            JSObject result = new JSObject();
-            result.put("ready", false);
-            call.resolve(result);
+        if (!isSdkSupported()) {
+            call.resolve(readyResult(false));
             return;
         }
-        handwriting.isReady().addOnCompleteListener((task) -> {
-            JSObject result = new JSObject();
-            result.put("ready", task.isSuccessful() && Boolean.TRUE.equals(task.getResult()));
-            call.resolve(result);
-        });
+        handwriting
+            .isReady()
+            .addOnCompleteListener((task) -> call.resolve(readyResult(task.isSuccessful() && Boolean.TRUE.equals(task.getResult()))));
     }
 
     @PluginMethod
     public void prepareHandwriting(PluginCall call) {
-        if (Build.VERSION.SDK_INT < MIN_SDK) {
-            call.reject("Android " + MIN_SDK + " (API level) or newer is required.", UNAVAILABLE);
+        if (!isSdkSupported()) {
+            call.reject(MIN_SDK_MESSAGE, UNAVAILABLE);
             return;
         }
         handwriting.download(call.getBoolean("requireWifi", false)).addOnCompleteListener((task) -> {
@@ -628,8 +583,8 @@ public class JapaneseOcrPlugin extends Plugin {
 
     @PluginMethod
     public void recognizeHandwriting(PluginCall call) {
-        if (Build.VERSION.SDK_INT < MIN_SDK) {
-            call.reject("Android " + MIN_SDK + " (API level) or newer is required.", UNAVAILABLE);
+        if (!isSdkSupported()) {
+            call.reject(MIN_SDK_MESSAGE, UNAVAILABLE);
             return;
         }
         List<HandwritingEngine.Stroke> strokes;
@@ -667,6 +622,7 @@ public class JapaneseOcrPlugin extends Plugin {
         });
     }
 
+    /** Reads `strokes` from JS: { points: { x, y, t? }[] }[]. Strokes without points are skipped. */
     private static List<HandwritingEngine.Stroke> parseStrokes(@Nullable JSArray array) throws JSONException {
         if (array == null) throw new IllegalArgumentException("strokes is missing");
         List<HandwritingEngine.Stroke> strokes = new ArrayList<>();
@@ -704,7 +660,13 @@ public class JapaneseOcrPlugin extends Plugin {
         return result;
     }
 
-    // Errors
+    // Results and errors
+
+    private static JSObject readyResult(boolean ready) {
+        JSObject result = new JSObject();
+        result.put("ready", ready);
+        return result;
+    }
 
     private static String errorMessage(@Nullable Exception e, String fallback) {
         return e != null && e.getMessage() != null ? e.getMessage() : fallback;
@@ -714,6 +676,7 @@ public class JapaneseOcrPlugin extends Plugin {
         return e instanceof CodedException ? ((CodedException) e).code : RECOGNITION_FAILED;
     }
 
+    /** An exception that carries the error code the call is rejected with. */
     private static class CodedException extends Exception {
 
         final String code;
