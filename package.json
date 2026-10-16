@@ -38,7 +38,7 @@
     "fmt": "npm run eslint -- --fix && npm run prettier -- --write",
     "eslint": "eslint . --ext ts",
     "prettier": "prettier \"**/*.{css,html,ts,js,java}\" --plugin=prettier-plugin-java",
-    "build": "npm run clean && tsc && rollup -c rollup.config.mjs",
+    "build": "npm run clean && tsc && node scripts/embed-assets.mjs && rollup -c rollup.config.mjs",
     "clean": "rimraf ./dist",
     "watch": "tsc --watch",
     "prepublishOnly": "npm run build",
@@ -67,5 +67,8 @@
     "android": {
       "src": "android"
     }
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.30.0"
   }
 }

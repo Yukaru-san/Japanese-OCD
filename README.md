@@ -1,6 +1,7 @@
 # capacitor-japanese-ocr
 
-Japanese text recognition (OCR) for Capacitor apps, on the device, with Google ML Kit.
+Japanese text recognition (OCR) for Capacitor apps, on the device: with Google ML Kit on Android, and with a
+built-in PaddleOCR engine in the browser (web, iOS WebView, or on Android when you switch to it).
 
 - **Live camera:** the camera preview runs behind your web page, recognized text arrives as events.
 - **Capture:** freeze the picture and get its text, optionally the photo as a file.
@@ -12,10 +13,10 @@ Japanese text recognition (OCR) for Capacitor apps, on the device, with Google M
 - **Positions:** every block, line and character comes with its position on screen, so you can draw your own
   highlights or buttons over recognized words.
 
-| Platform | Support                                                                                         |
-| -------- | ----------------------------------------------------------------------------------------------- |
-| Android  | Yes, Android 7.0 (API 24) or newer                                                              |
-| Web, iOS | No. `isDeviceSupported()`, `isOcrReady()`, `isTranslationReady()` and `isHandwritingReady()` return `false`, every other call throws `UNAVAILABLE` |
+| Platform | Engine                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------ |
+| Android  | Native ML Kit (Android 7.0 / API 24 or newer). Switchable to the web engine with `setEngine({ engine: 'web' })`. |
+| Web, iOS | Web engine (PaddleOCR PP-OCRv6 in WebAssembly), same API and same result format. See [Web engine](#web-engine). |
 
 Requires Capacitor 8.
 
@@ -305,14 +306,72 @@ recognized; use `selectRegion: true` to let the user frame only the article.
 - **Start twice** throws `ALREADY_RUNNING`; capture/resume/torch without a running camera throw `NOT_RUNNING`.
 - **Leaving the app** pauses the camera; it resumes when the app comes back.
 
+## Web engine
+
+In the browser (and in the iOS WebView) the plugin runs its own OCR: PaddleOCR **PP-OCRv6 small** (text detection
+and recognition, Apache-2.0) on **ONNX Runtime Web 1.30.0** (WebAssembly). The model weights and the WebAssembly
+runtime are bundled in the package, nothing is downloaded from a server at runtime. Results have exactly the same
+format as on Android (same fields, same key order, furigana, segments, reading order, `viewBoundingBox` for live
+results), so the same app code works on both.
+
+### Switching engines
+
+```ts
+await JapaneseOcr.setEngine({ engine: 'web' });    // 'auto' (default), 'native' or 'web'
+const { engine, active, nativeAvailable } = await JapaneseOcr.getEngine();
+```
+
+- `'auto'` uses the native engine on Android and the web engine everywhere else.
+- `'web'` makes the app behave like a plain web page, also on Android: browser camera, browser file picker, no
+  native features.
+- `'native'` throws `UNAVAILABLE` where there is no native engine (web, iOS).
+- Switching stops a running live recognition of the previous engine. Listeners stay registered and keep working.
+- `isDeviceSupported()` also returns `engine: 'native' | 'web'`, the engine that answered.
+
+The choice is not stored; call `setEngine()` again after the app starts if you want to keep it.
+
+### Size and loading
+
+- The web engine adds about **25 MB** of JavaScript (about 16.6 MB gzipped): detection model 6.7 MB, recognition
+  model 14.2 MB, WebAssembly runtime 4.9 MB, character list 0.1 MB.
+- These are separate chunks that bundlers (Vite, webpack, Rollup) load **only when the web engine is used**. On
+  Android with the native engine they are never loaded, but they are part of the app's web assets.
+- Loading starts with the first call; `isOcrReady()` turns `true` when the models are ready (a few seconds).
+
+### How it behaves in the browser
+
+| Feature | Web engine |
+| --- | --- |
+| Live camera | `getUserMedia`. The video is placed full-screen behind the page (like the native preview); your page needs a transparent background where the camera should show. The plugin sets `background: transparent` on `html` and `body` while live recognition runs (class `japanese-ocr-live` on `<html>`). `lensFacing`, `intervalMs` and `viewBoundingBox` work as on Android. |
+| Camera permission | The browser's own prompt. `checkPermissions()` uses the Permissions API; `requestPermissions()` opens the camera briefly to ask. Needs HTTPS or `localhost`. |
+| Flash | `setTorch()` works where the browser supports the `torch` constraint (Chrome on Android); otherwise `UNAVAILABLE`. |
+| Capture | `saveImage: true` returns `imagePath` as a `blob:` URL; use it directly as `<img src>`. |
+| Gallery | Opens the browser's file picker. `imagePath` is a `blob:` URL. Cancelling throws `CANCELLED` (in browsers that report it; otherwise when the window gets focus back without a file). |
+| `recognizeImage` | `base64`, or `path` as any URL the page can `fetch()` (`https:`, relative, `blob:`, `data:`). `file://` and `content://` paths don't work in the browser. |
+| Selection screen | `selectRegion: true` shows the same rotate/frame screen, as HTML. |
+| Translation | Uses the browser's built-in on-device Translator API (Chrome 138+ on desktop). Without it, translation calls throw `UNAVAILABLE` and `isDeviceSupported().translation` is `false`. `prepareTranslation()` downloads the language pack (the browser may require a tap first); `requireWifi` is ignored. |
+| Handwriting | Recognized with the PaddleOCR recognizer, limited to Japanese characters, up to 5 candidates with probabilities. Noticeably less accurate than ML Kit's handwriting model, best with neat, upright characters; `preContext` is ignored. `prepareHandwriting()` only loads the OCR models. |
+
+### Limits
+
+- **Speed:** a 1600 px image takes a few seconds (about 7 s for a full phone screenshot on a desktop browser,
+  slower on phones). Live recognition analyzes frames at 960 px and produces fewer results per second than ML Kit.
+  When the page is cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`), up to 4 threads are used, which is about twice as fast. The
+  Capacitor WebView on Android cannot send these headers, so there it runs single-threaded.
+- **Vertical text** is recognized and ordered correctly, but less reliably than horizontal text: small punctuation
+  (`、` `。`) can be missed and furigana next to each other may be merged.
+- **Text near the image edge** that is cut off may come back as a separate block.
+- Confidence values come from PaddleOCR and are not comparable with ML Kit's.
+
 ## Errors
 
 Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to narrow a caught value.
 
 | Code                    | Meaning                                                       |
 | ----------------------- | ------------------------------------------------------------- |
-| `UNAVAILABLE`           | Not supported on this platform/device (web, iOS, no camera, no flash). |
-| `NOT_READY`             | The recognizer failed to load on this device. Retrying won't help. |
+| `UNAVAILABLE`           | Not supported here: no camera, no flash, no translation in this browser, no WebAssembly, or `setEngine({ engine: 'native' })` without a native engine. |
+| `NOT_READY`             | The recognizer failed to load on this device (web: the models could not be loaded). Retrying won't help. |
 | `PERMISSION_DENIED`     | The camera permission was refused.                            |
 | `CAMERA_ERROR`          | The camera could not be opened or a photo failed.             |
 | `ALREADY_RUNNING`       | Live recognition (or a capture) is already running.           |
@@ -322,7 +381,7 @@ Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to
 | `TRANSLATION_NOT_READY` | The translation model is not downloaded. Call `prepareTranslation()`. |
 | `TRANSLATION_FAILED`    | Translating failed.                                           |
 | `CANCELLED`             | The user closed the photo picker or the selection screen.     |
-| `HANDWRITING_NOT_READY` | The handwriting model is missing and could not be downloaded (offline?). |
+| `HANDWRITING_NOT_READY` | The handwriting model is missing and could not be downloaded (offline?). Web: the OCR models failed to load. |
 
 ## API
 
@@ -330,18 +389,20 @@ All methods return Promises. Types are exported from the package.
 
 | Method                                     | Returns                    | Notes                                                    |
 | ------------------------------------------ | -------------------------- | -------------------------------------------------------- |
-| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, translation, handwriting, reason? }`. Never throws. |
+| `setEngine({ engine })`                    | `void`                     | `'auto'`, `'native'` or `'web'`. See [Web engine](#web-engine). |
+| `getEngine()`                              | `{ engine, active, nativeAvailable }` | `active` is `'native'` or `'web'`.              |
+| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, translation, handwriting, engine, reason? }`. Never throws. |
 | `isOcrReady()`                             | `{ ready }`                | Never throws.                                            |
 | `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
 | `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (500), translation?: { enabled, targetLanguage? } }` |
 | `stopLiveRecognition()`                    | `void`                     |                                                          |
-| `captureFrame(options?)`                   | `CaptureResult`            | `{ saveImage?: boolean }`. With `saveImage`, `imagePath` is a `file://` path; show it with `Capacitor.convertFileSrc()`. |
+| `captureFrame(options?)`                   | `CaptureResult`            | `{ saveImage?: boolean }`. With `saveImage`, `imagePath` is a `file://` path; show it with `Capacitor.convertFileSrc()` (web engine: a `blob:` URL). |
 | `resumeLiveRecognition()`                  | `void`                     |                                                          |
 | `getLiveState()`                           | `{ running, frozen, translation }` |                                                  |
 | `setTorch({ enabled })`                    | `void`                     |                                                          |
 | `setTranslation({ enabled, targetLanguage? })` | `void`                 |                                                          |
 | `recognizeImage({ path?, base64?, translation?, selectRegion?, regions? })` | `OcrResult` | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes. |
-| `recognizeFromGallery({ translation?, selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating). |
+| `recognizeFromGallery({ translation?, selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating; web engine: `blob:`). |
 | `prepareTranslation({ targetLanguage?, requireWifi? })` | `void`        | Downloads the model if needed.                           |
 | `isTranslationReady({ targetLanguage? })`  | `{ ready }`                | Never throws.                                            |
 | `recognizeHandwriting({ strokes, width?, height?, preContext?, maxResults? })` | `{ text, candidates }` | `strokes: { points: { x, y, t? }[] }[]`; up to 5 `{ text, probability, score }`, best first. |
@@ -409,3 +470,13 @@ interface Point { x: number; y: number }
 - Release builds with R8/minify need no extra rules.
 - Library versions can be overridden in your app's `android/variables.gradle`: `cameraxVersion`,
   `mlkitTextRecognitionJapaneseVersion`, `mlkitTranslateVersion`, `mlkitDigitalInkVersion`.
+
+## Web engine details
+
+- Models: [PP-OCRv6_small_det](https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx) and
+  [PP-OCRv6_small_rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx) (Apache-2.0), stored in
+  `web-models/` with their weights as float16 to halve the size (they are converted back to float32 when loaded; the
+  recognized text matched the original weights in our tests). See [web-models/README.md](web-models/README.md).
+- Runtime: `onnxruntime-web` 1.30.0 (MIT), WebAssembly backend; the `.wasm` file is embedded in the JavaScript, so no
+  bundler or server configuration is needed.
+- `npm run build` turns the models into the JavaScript chunks in `dist/esm/web/assets/`.
