@@ -3,7 +3,7 @@
 // (androidBridge.postMessage → Capacitor.fromNative) and returns data in the shape the
 // Java plugin builds in OcrEngine.toResult(). It knows nothing about the app's glossary.
 (() => {
-  const state = { permission: 'prompt', running: false, frozen: false, translation: null, models: new Set(), clipboard: '', torch: false };
+  const state = { inkModel: false, permission: 'prompt', running: false, frozen: false, translation: null, models: new Set(), clipboard: '', torch: false };
   const listeners = {};
 
   // A camera frame that shows two lines of text. Each line: text, left, top in CSS px of the WebView.
@@ -82,7 +82,22 @@
   }
 
   const ocr = {
-    isDeviceSupported: () => ({ supported: true, liveCamera: true, translation: true }),
+    isDeviceSupported: () => ({ supported: true, liveCamera: true, translation: true, handwriting: true }),
+    isHandwritingReady: () => ({ ready: state.inkModel }),
+    prepareHandwriting: () => { state.inkModel = true; },
+    recognizeHandwriting: (o) => {
+      if (!Array.isArray(o.strokes)) throw reject('strokes is missing', 'INVALID_ARGUMENT');
+      state.inkModel = true;
+      state.lastInk = o;
+      if (!o.strokes.length) return { text: '', candidates: [] };
+      // Same shape as JapaneseOcrPlugin.candidatesResult(); probabilities are softmax of -score.
+      const texts = ['日本', '日木', '曰本', '目本', '日太'].slice(0, o.maxResults || 5);
+      const scores = texts.map((_, i) => 1 + i * 0.8);
+      const exp = scores.map((s) => Math.exp(scores[0] - s));
+      const sum = exp.reduce((a, b) => a + b, 0);
+      const candidates = texts.map((text, i) => ({ text, score: scores[i], probability: exp[i] / sum }));
+      return { text: texts[0], candidates };
+    },
     isOcrReady: () => ({ ready: true }),
     checkPermissions: () => ({ camera: state.permission }),
     requestPermissions: () => { state.permission = 'granted'; return { camera: 'granted' }; },

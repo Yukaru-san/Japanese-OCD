@@ -37,7 +37,7 @@ const headers = [
       'isDeviceSupported', 'isOcrReady', 'checkPermissions', 'requestPermissions', 'startLiveRecognition',
       'stopLiveRecognition', 'captureFrame', 'resumeLiveRecognition', 'getLiveState', 'setTorch',
       'setTranslation', 'recognizeImage', 'recognizeFromGallery', 'prepareTranslation', 'isTranslationReady', 'translateText',
-      'removeAllListeners',
+      'recognizeHandwriting', 'prepareHandwriting', 'isHandwritingReady', 'removeAllListeners',
     ]).concat([{ name: 'addListener', rtype: 'callback' }]),
   },
   { name: 'Clipboard', methods: promise(['write', 'read']) },
@@ -133,6 +133,38 @@ const browser = await chromium.launch();
   await page.click('#gallery');
   await page.waitForFunction(() => document.getElementById('log').textContent.includes('Galerie: keine Auswahl'));
   check('closing the picker is handled quietly', !(await page.textContent('#log')).split('\n')[0].includes('→'));
+
+  // Handwriting: draw two strokes, candidates appear by themselves
+  const ink = page.locator('#ink');
+  await ink.scrollIntoViewIfNeeded();
+  const inkBox = await ink.boundingBox();
+  const drawLine = async (x1, y1, x2, y2) => {
+    await page.mouse.move(inkBox.x + x1, inkBox.y + y1);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(inkBox.x + x1 + ((x2 - x1) * i) / 8, inkBox.y + y1 + ((y2 - y1) * i) / 8);
+    await page.mouse.up();
+  };
+  await drawLine(40, 40, 40, 140);
+  await drawLine(40, 40, 100, 40);
+  await page.waitForFunction(() => document.querySelectorAll('#ink-candidates li').length === 5);
+  const ink1 = await page.evaluate(() => window.__fakeAndroid.lastInk);
+  check('strokes reach the plugin with points and times', ink1.strokes.length === 2 && ink1.strokes[0].points.length >= 8 && ink1.strokes[0].points.every((p) => typeof p.t === 'number'), JSON.stringify(ink1.strokes[0].points[0]));
+  check('drawing area size is passed', Math.abs(ink1.width - inkBox.width) <= 2 && Math.abs(ink1.height - 200) < 2, `${ink1.width}x${ink1.height}`);
+  const firstPoint = ink1.strokes[0].points[0];
+  check('points are relative to the drawing area', Math.abs(firstPoint.x - 40) < 2 && Math.abs(firstPoint.y - 40) < 2, JSON.stringify(firstPoint));
+  const items = await page.$$eval('#ink-candidates li', (els) => els.map((e) => e.textContent));
+  check('5 candidates with probability shown', items[0] === '日本56.1 %' && items.every((t) => / %$/.test(t)), items.join(' | '));
+  await page.screenshot({ path: join(shots, '5-handwriting.png') });
+  await page.click('#ink-candidates li:first-child button');
+  await page.waitForFunction(() => document.querySelectorAll('#ink-candidates li').length === 0);
+  check('tapping a candidate appends it and clears the drawing', (await page.inputValue('#ink-text')) === '日本');
+  await drawLine(40, 40, 120, 120);
+  await page.waitForFunction(() => document.querySelectorAll('#ink-candidates li').length === 5);
+  check('accepted text is sent as preContext', (await page.evaluate(() => window.__fakeAndroid.lastInk.preContext)) === '日本');
+  await page.click('#ink-undo');
+  await page.waitForFunction(() => document.querySelectorAll('#ink-candidates li').length === 0);
+  check('undo of the only stroke clears the candidates', true);
+  check('handwriting model shown as loaded', (await page.textContent('#handwriting-ready')) === 'geladen');
 
   // Error path: starting with translation for a language whose model is missing
   await page.selectOption('#language', 'en');
