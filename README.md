@@ -11,6 +11,10 @@ on a phone and tested in a browser:
 - **Images:** gallery or file, optionally framed by the user first; text, furigana as ruby, glossary words, photo.
 - **Handwriting:** a drawing area with up to 5 candidates and their probability.
 - **Result:** copy the text, raw JSON, and a log of every plugin call.
+- **Wörterbuch (demo):** how an app connects its own dictionary. The recognized text is drawn character by
+  character with its furigana; tap a character (or a spot on the photo) to look up the longest word starting there,
+  with reading, meaning, conjugation and the kanji's readings and strokes; tap „Satz“ to split a whole sentence into
+  words. A search box looks up words (also conjugated), readings, German meanings and kanji without OCR.
 
 The glossary explanations come from the app (`src/dictionary.ts`), not from the plugin: ML Kit and PaddleOCR only
 recognize the characters.
@@ -46,6 +50,8 @@ The plugin is installed from the `main` branch on GitHub. To try a local checkou
 | `src/overlay.ts` | Finds glossary words in a result (`findWords`) and draws a tappable marker at each word's `viewBoundingBox`; tapping shows the explanation. |
 | `src/dictionary.ts` | The app's glossary: reading, meaning and a note per word. |
 | `src/images.ts` | "Bild erkennen": `recognizeFromGallery()`, or a file read as base64 for `recognizeImage()`; both with `selectRegion` when the checkbox is on. |
+| `src/lexicon.ts` | The demo's sample dictionary (about 55 words, 50 kanji) and its lookup: longest match from a position, a few conjugation rules, sentence splitting into words, search. Replace it with your own dictionary. |
+| `src/dictionary-demo.ts` | "Wörterbuch": draws `getSentences()` / `getCharacters()` as tappable characters with ruby, looks up a tap with `characterAt()` on the photo, shows word, kanji and sentence cards. |
 | `src/result.ts` | "Ergebnis": shows a result (text, `toRubyHtml`, furigana list, glossary words, photo, JSON), copy via `@capacitor/clipboard`. |
 | `src/ink.ts`, `src/ink-pad.ts` | "Handschrift": `InkPad` collects the strokes on a `<canvas>`; `ink.ts` calls `recognizeHandwriting()` 300 ms after each stroke and lists the candidates. |
 | `src/style.css` | Layout. `body.live` hides the panels and makes the page transparent while the camera runs. |
@@ -66,6 +72,19 @@ The plugin is installed from the `main` branch on GitHub. To try a local checkou
 
 Gallery and file results take the same way into `showResult()` (`src/result.ts`), but have no
 `viewBoundingBox`, since the image is not on screen, so no markers are drawn for them.
+
+### How a tap reaches the dictionary
+
+1. `showResult()` passes every result to `showDictionaryResult()` (`src/dictionary-demo.ts`), which draws
+   `getSentences(result)`: one row per sentence, one `<span>` per character from `getCharacters()`, characters that
+   share a furigana in one `<ruby>`.
+2. A tap on a character takes `result.blocks[char.block].text.slice(char.start)` and asks `longestMatch()`
+   (`src/lexicon.ts`) for the longest word starting there, conjugated forms included (読みました → 読む). Inside a
+   word with furigana the lookup starts at that word, so tapping 本 in 日本語 finds 日本語. The furigana from the
+   picture is shown next to the dictionary reading.
+3. A tap on the photo converts the tap to image pixels (`imageWidth / displayed width`) and calls
+   `characterAt(result, point, { coordinates: 'image' })`, then continues as in 2.
+4. „Satz“ splits `sentence.text` into words with `tokenize()` and shows each one as a button.
 
 ## Bridge test
 

@@ -1,10 +1,11 @@
 // The "Ergebnis" section: shows a recognition result (text, ruby, furigana, glossary words, photo,
-// raw JSON) and copies the text.
+// raw JSON) and copies the text. Every result also goes to the dictionary demo.
 import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
 import { toRubyHtml } from 'capacitor-japanese-ocr';
 import type { OcrResult } from 'capacitor-japanese-ocr';
 
+import { showDictionaryResult } from './dictionary-demo';
 import { findWords } from './overlay';
 import { $, log, run } from './ui';
 
@@ -27,6 +28,7 @@ export function showResult(result: OcrResult & { imagePath?: string }): void {
   } else {
     capturedImage.hidden = true;
   }
+  showDictionaryResult(result);
 }
 
 async function copy(text: string, label: string): Promise<void> {

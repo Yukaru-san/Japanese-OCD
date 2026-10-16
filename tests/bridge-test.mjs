@@ -149,6 +149,28 @@ const browser = await chromium.launch();
   check('gallery asks for the selection screen', (await page.evaluate(() => window.__fakeAndroid.lastGallery?.selectRegion)) === true);
   check('text is shown with furigana as ruby', (await page.innerHTML('#result-ruby')).includes('<ruby>日本語<rt>にほんご</rt></ruby>を勉強する'));
   check('gallery photo is shown', await page.evaluate(() => !document.getElementById('captured-image').hidden && document.getElementById('captured-image').src.includes('_capacitor_content_')));
+  // Dictionary demo: the gallery result is drawn character by character
+  check('dictionary demo shows the sentences', (await page.$$eval('#dict-text .sentence', (els) => els.map((e) => e.querySelector('.chars').textContent))).join('|') === 'こんにちは、せかい|日本語にほんごを勉強する');
+  await page.click('#dict-text .char:text-is("本")');
+  const entry = await page.textContent('#dict-entry');
+  check('tapping 本 inside 日本語 looks up the whole word with the OCR furigana', entry.includes('日本語【にほんご】') && entry.includes('Japanisch') && entry.includes('Furigana im Bild: にほんご ✓'), entry);
+  check('the word is marked in the text', (await page.$$eval('#dict-text .char.hit', (els) => els.map((e) => e.textContent).join(''))) === '日本語');
+  check('kanji of the word are explained', entry.includes('Sonne') && entry.includes('On: ニチ'));
+  await page.locator('#dict-text .sentence').nth(1).locator('.sentence-button').click();
+  const tokens = await page.$$eval('#dict-entry .token', (els) => els.map((e) => e.textContent));
+  check('sentence lookup splits into words', tokens.join('|') === '日本語|を|勉強|する', tokens.join('|'));
+  check('sentence gloss shown', (await page.textContent('#dict-entry .gloss')).includes('勉強 = Lernen'));
+  await page.click('#dict-text .char:text-is("勉")');
+  check('tapping 勉 looks up 勉強', (await page.textContent('#dict-entry')).includes('勉強【べんきょう】'));
+  await page.fill('#dict-query', 'Katze');
+  await page.click('#dict-search');
+  check('search by German meaning', (await page.textContent('#dict-entry')).includes('猫【ねこ】'));
+  await page.fill('#dict-query', '読みました');
+  await page.click('#dict-search');
+  check('search finds the dictionary form of a conjugated verb', (await page.textContent('#dict-entry')).includes('読みました → Grundform 読む'));
+  await page.locator('#dict-entry').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(shots, '6-dictionary.png') });
+
   await page.evaluate(() => { window.__fakeAndroid.pickerCancels = true; });
   await page.click('#gallery');
   await page.waitForFunction(() => document.getElementById('log').textContent.includes('Galerie: keine Auswahl'));

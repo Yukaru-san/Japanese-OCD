@@ -86,6 +86,21 @@
       </section>
 
       <section>
+        <h2>Wörterbuch (Demo)</h2>
+        <p class="muted">
+          Ein kleines Beispiel-Wörterbuch (rund 55 Wörter, 50 Kanji) zeigt, wie ein eigenes Wörterbuch an die
+          Ergebnisse angebunden wird. Suche nach Wort, Kanji, Lesung, deutscher Bedeutung oder einem ganzen Satz.
+        </p>
+        <div class="row">
+          <input id="dict-query" type="search" lang="ja" placeholder="z. B. 日本語, ねこ, Katze, 読みます" />
+          <button id="dict-search">Suchen</button>
+        </div>
+        <p id="dict-hint" class="muted">Nach einer Erkennung erscheint der Text hier zum Antippen.</p>
+        <div id="dict-text" lang="ja"></div>
+        <div id="dict-entry" lang="ja" hidden></div>
+      </section>
+
+      <section>
         <h2>Log</h2>
         <pre id="log"></pre>
       </section>
