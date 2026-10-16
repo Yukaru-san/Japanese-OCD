@@ -60,9 +60,9 @@ const browser = await chromium.launch();
   await page.addInitScript(`${nativeBridge}\nwindow.Capacitor.PluginHeaders = ${JSON.stringify(headers)};`);
   await page.goto(url);
 
-  await page.waitForFunction(() => document.getElementById('ready').textContent === 'ja');
+  await page.waitForFunction(() => document.getElementById('ready').textContent.startsWith('ja'));
   check('isDeviceSupported shown', (await page.textContent('#supported')).startsWith('ja'));
-  check('isOcrReady shown', (await page.textContent('#ready')) === 'ja');
+  check('isOcrReady shown', (await page.textContent('#ready')).startsWith('ja'));
 
   await page.click('#start');
   await page.waitForFunction(() => document.getElementById('live-text').textContent.includes('せかい'));

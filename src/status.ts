@@ -58,8 +58,8 @@ export async function refreshStatus(): Promise<void> {
     : `nein: ${support.reason ?? ''}`;
   if (support.engine) $('supported').textContent += ` · Engine: ${support.engine}`;
 
-  const { ready } = await JapaneseOcr.isOcrReady();
-  $('ready').textContent = ready ? 'ja' : 'nein';
+  const { ready, reason } = await JapaneseOcr.isOcrReady();
+  $('ready').textContent = ready ? 'ja' : reason ? `nein: ${reason}` : 'nein (lädt noch)';
 
   const handwritingReady = await JapaneseOcr.isHandwritingReady();
   $('handwriting-ready').textContent = handwritingReady.ready ? 'geladen' : 'nicht geladen (lädt beim ersten Schreiben)';
@@ -79,4 +79,23 @@ export function initStatus(): void {
     await run('requestPermissions', () => JapaneseOcr.requestPermissions());
     await refreshStatus();
   };
+}
+
+/**
+ * Polls isOcrReady() after start-up until the recognizer is loaded or failed and shows how long it
+ * took, so a slow first load is visible instead of a "nein" that never updates.
+ */
+export async function watchReady(): Promise<void> {
+  const started = performance.now();
+  const seconds = () => ((performance.now() - started) / 1000).toFixed(1);
+  for (;;) {
+    const { ready, reason } = await JapaneseOcr.isOcrReady();
+    if (ready || reason) {
+      $('ready').textContent = ready ? `ja (nach ${seconds()} s)` : `nein: ${reason}`;
+      log(ready ? `OCR bereit nach ${seconds()} s` : `OCR lädt nicht: ${reason}`);
+      return;
+    }
+    $('ready').textContent = `lädt … (${seconds()} s)`;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }

@@ -4,7 +4,7 @@ import { initImages } from './images';
 import { initInk } from './ink';
 import { initLive, initLiveListeners } from './live';
 import { initResult } from './result';
-import { initEngine, initStatus, refreshStatus } from './status';
+import { initEngine, initStatus, refreshStatus, watchReady } from './status';
 
 async function init(): Promise<void> {
   await initEngine();
@@ -17,8 +17,8 @@ async function init(): Promise<void> {
   initResult();
 
   await refreshStatus();
-  // The recognizer warms up in the background; show when it becomes ready.
-  setTimeout(() => void refreshStatus(), 1500);
+  // The recognizer warms up in the background; show when it becomes ready and how long it took.
+  void watchReady();
 }
 
 void init();
