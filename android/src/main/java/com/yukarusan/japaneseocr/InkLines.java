@@ -14,40 +14,58 @@ final class InkLines {
 
     private InkLines() {}
 
-    /** Vertical extent of one stroke. */
+    /** Vertical extent of one stroke, and its size (the longer side of its bounding box). */
     static final class Span {
 
         final int stroke;
         final float top;
         final float bottom;
+        final float size;
 
-        Span(int stroke, float top, float bottom) {
+        Span(int stroke, float top, float bottom, float size) {
             this.stroke = stroke;
             this.top = top;
             this.bottom = bottom;
+            this.size = size;
         }
     }
 
     /**
      * Groups strokes into rows written one below the other. Strokes whose vertical extents overlap
      * belong to the same row, so a row only ends where there is a horizontal gap across the whole
-     * drawing. Rows are returned top to bottom; each keeps its strokes in drawing order.
+     * drawing. A flat row (thinner than half a character) closer than one character to its
+     * neighbour is part of the same characters, e.g. the bars of 三 or 二, and is merged with it.
+     * The character size is the largest stroke. Rows are returned top to bottom; each keeps its
+     * strokes in drawing order.
      */
     static List<List<Integer>> rows(List<Span> spans) {
         List<Span> sorted = new ArrayList<>(spans);
         Collections.sort(sorted, Comparator.comparingDouble((Span s) -> s.top));
         List<List<Integer>> rows = new ArrayList<>();
-        float rowBottom = Float.NEGATIVE_INFINITY;
-        List<Integer> row = null;
+        List<float[]> extents = new ArrayList<>(); // top, bottom per row
+        float charSize = 0;
         for (Span span : sorted) {
-            if (row == null || span.top > rowBottom) {
-                row = new ArrayList<>();
-                rows.add(row);
-                rowBottom = span.bottom;
+            charSize = Math.max(charSize, span.size);
+            float[] last = extents.isEmpty() ? null : extents.get(extents.size() - 1);
+            if (last == null || span.top > last[1]) {
+                rows.add(new ArrayList<>());
+                extents.add(new float[] { span.top, span.bottom });
             } else {
-                rowBottom = Math.max(rowBottom, span.bottom);
+                last[1] = Math.max(last[1], span.bottom);
             }
-            row.add(span.stroke);
+            rows.get(rows.size() - 1).add(span.stroke);
+        }
+        for (int i = 0; i + 1 < rows.size(); ) {
+            float[] a = extents.get(i);
+            float[] b = extents.get(i + 1);
+            boolean flat = a[1] - a[0] < charSize / 2 || b[1] - b[0] < charSize / 2;
+            if (flat && b[0] - a[1] < charSize) {
+                rows.get(i).addAll(rows.remove(i + 1));
+                a[1] = Math.max(a[1], extents.remove(i + 1)[1]);
+                if (i > 0) i--; // the grown row may now join the previous one
+            } else {
+                i++;
+            }
         }
         for (List<Integer> r : rows) Collections.sort(r);
         return rows;

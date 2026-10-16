@@ -87,11 +87,15 @@ class HandwritingEngine {
             Stroke s = strokes.get(i);
             float top = Float.POSITIVE_INFINITY;
             float bottom = Float.NEGATIVE_INFINITY;
-            for (float y : s.y) {
-                top = Math.min(top, y);
-                bottom = Math.max(bottom, y);
+            float left = Float.POSITIVE_INFINITY;
+            float right = Float.NEGATIVE_INFINITY;
+            for (int j = 0; j < s.y.length; j++) {
+                top = Math.min(top, s.y[j]);
+                bottom = Math.max(bottom, s.y[j]);
+                left = Math.min(left, s.x[j]);
+                right = Math.max(right, s.x[j]);
             }
-            spans.add(new InkLines.Span(i, top, bottom));
+            spans.add(new InkLines.Span(i, top, bottom, Math.max(bottom - top, right - left)));
         }
         List<List<Integer>> rows = InkLines.rows(spans);
         Task<List<InkLines.Candidate>> chain = Tasks.forResult(new ArrayList<>());

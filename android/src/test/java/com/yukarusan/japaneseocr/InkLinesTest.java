@@ -15,7 +15,7 @@ public class InkLinesTest {
     @Test
     public void overlappingStrokesFormOneRow() {
         List<List<Integer>> rows = InkLines.rows(
-            Arrays.asList(new InkLines.Span(0, 10, 50), new InkLines.Span(1, 30, 60), new InkLines.Span(2, 55, 58))
+            Arrays.asList(new InkLines.Span(0, 10, 50, 40), new InkLines.Span(1, 30, 60, 40), new InkLines.Span(2, 55, 58, 40))
         );
         assertEquals(Arrays.asList(Arrays.asList(0, 1, 2)), rows);
     }
@@ -25,13 +25,37 @@ public class InkLinesTest {
         // Second row drawn first, then the first row, then one more stroke in the second row.
         List<List<Integer>> rows = InkLines.rows(
             Arrays.asList(
-                new InkLines.Span(0, 100, 140),
-                new InkLines.Span(1, 10, 50),
-                new InkLines.Span(2, 12, 48),
-                new InkLines.Span(3, 105, 150)
+                new InkLines.Span(0, 100, 140, 40),
+                new InkLines.Span(1, 10, 50, 40),
+                new InkLines.Span(2, 12, 48, 40),
+                new InkLines.Span(3, 105, 150, 40)
             )
         );
         assertEquals(Arrays.asList(Arrays.asList(1, 2), Arrays.asList(0, 3)), rows);
+    }
+
+    @Test
+    public void barsOfOneCharacterStayInOneRow() {
+        // 三: three horizontal bars, 40 wide, with gaps between them.
+        List<List<Integer>> three = InkLines.rows(
+            Arrays.asList(new InkLines.Span(0, 10, 12, 30), new InkLines.Span(1, 28, 30, 25), new InkLines.Span(2, 48, 51, 40))
+        );
+        assertEquals(Arrays.asList(Arrays.asList(0, 1, 2)), three);
+    }
+
+    @Test
+    public void flatCharacterInASentenceJoinsItsRowOnly() {
+        // Row 1: 三 (bars at 10, 28, 48); row 2, a character at 100–141, starts more than one character below.
+        List<List<Integer>> rows = InkLines.rows(
+            Arrays.asList(
+                new InkLines.Span(0, 10, 12, 30),
+                new InkLines.Span(1, 28, 30, 25),
+                new InkLines.Span(2, 48, 51, 40),
+                new InkLines.Span(3, 100, 140, 40),
+                new InkLines.Span(4, 102, 141, 40)
+            )
+        );
+        assertEquals(Arrays.asList(Arrays.asList(0, 1, 2), Arrays.asList(3, 4)), rows);
     }
 
     @Test
