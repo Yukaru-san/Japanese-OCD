@@ -53,7 +53,10 @@ function union(boxes: Rect[]): Rect {
   };
 }
 
-/** Finds glossary words in the recognized text, with their position in the WebView. */
+/**
+ * Finds glossary words in the recognized text, with their position in the WebView. Like the
+ * plugin's findText(), but for every word of the glossary at once, longest first.
+ */
 export function findWords(result: OcrResult): WordMatch[] {
   const matches: WordMatch[] = [];
   for (const block of result.blocks) {
@@ -92,7 +95,6 @@ export function findWords(result: OcrResult): WordMatch[] {
 export class WordOverlay {
   private readonly layer: HTMLElement;
   private readonly popup: HTMLElement;
-  private openWord: string | null = null;
 
   constructor(layer: HTMLElement, popup: HTMLElement) {
     this.layer = layer;
@@ -133,7 +135,6 @@ export class WordOverlay {
   }
 
   private openPopup(match: WordMatch, box: Rect): void {
-    this.openWord = match.word;
     this.popup.replaceChildren();
     const title = document.createElement('strong');
     title.textContent = `${match.word} (${match.entry.reading})`;
@@ -151,11 +152,6 @@ export class WordOverlay {
   }
 
   private closePopup(): void {
-    this.openWord = null;
     this.popup.hidden = true;
-  }
-
-  get shownWord(): string | null {
-    return this.openWord;
   }
 }
