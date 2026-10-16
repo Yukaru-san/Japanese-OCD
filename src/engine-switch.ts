@@ -42,19 +42,24 @@ export function createJapaneseOcr(): JapaneseOcrPlugin {
 
   let choice: EngineOptions['engine'] = 'auto';
   const activeName = (): OcrEngineName => (choice === 'web' || !native ? 'web' : 'native');
-  const active = async (): Promise<JapaneseOcrEngine> => (activeName() === 'native' ? native! : loadWeb());
+  // Wrapped, because resolving a Promise with the native plugin proxy would call its (missing) then().
+  const active = async (): Promise<{ engine: JapaneseOcrEngine }> => ({
+    engine: activeName() === 'native' ? native! : await loadWeb(),
+  });
 
   const plugin = {} as Record<string, unknown>;
   for (const method of METHODS) {
     plugin[method] = async (...args: unknown[]) => {
-      const engine = (await active()) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+      const { engine } = (await active()) as unknown as {
+        engine: Record<string, (...a: unknown[]) => Promise<unknown>>;
+      };
       return engine[method](...args);
     };
   }
 
   plugin.isDeviceSupported = async () => {
     const engine = activeName();
-    const result = await (await active()).isDeviceSupported();
+    const result = await (await active()).engine.isDeviceSupported();
     return { ...result, engine };
   };
 
