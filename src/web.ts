@@ -11,6 +11,7 @@ import type {
   JapaneseOcrErrorCode,
   JapaneseOcrPlugin,
   LiveRecognitionOptions,
+  FocusOptions,
   LiveState,
   OcrReadyResult,
   OcrResult,
@@ -18,6 +19,7 @@ import type {
   Rect,
   RecognizeHandwritingOptions,
   RecognizeImageOptions,
+  ZoomOptions,
 } from './definitions';
 import type { LiveCamera } from './web/live';
 import type { PaddleEngine } from './web/paddle';
@@ -176,7 +178,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
 
     const { LiveCamera } = await import('./web/live');
     if (this.live) throw fail('ALREADY_RUNNING', 'Live recognition is already running.');
-    const interval = typeof options.intervalMs === 'number' ? options.intervalMs : 500;
+    const interval = typeof options.intervalMs === 'number' ? options.intervalMs : 300;
     const live: LiveCamera = new LiveCamera(options.lensFacing === 'front', interval, (frame, view): Promise<void> =>
       this.onFrame(engine, live, frame, view),
     );
@@ -231,10 +233,11 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   }
 
   async captureFrame(options: CaptureOptions = {}): Promise<CaptureResult> {
+    // Checked after the await, so of two quick calls the second is rejected instead of taking over.
+    const engine = await this.ensureOcr();
     const live = this.live;
     if (!live?.running) throw fail('NOT_RUNNING', 'Live recognition is not running.');
     if (this.pendingCapture || live.capturing) throw fail('ALREADY_RUNNING', 'A capture is already in progress.');
-    const engine = await this.ensureOcr();
 
     return new Promise<CaptureResult>((resolve, reject) => {
       const pending = { reject };
@@ -283,7 +286,28 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   }
 
   async getLiveState(): Promise<LiveState> {
-    return { running: !!this.live?.running, frozen: !!this.live?.frozen };
+    const live = this.live;
+    if (!live?.running) return { running: false, frozen: false };
+    return { running: true, frozen: live.frozen, ...live.zoomRange() };
+  }
+
+  async focusAt(options: FocusOptions): Promise<void> {
+    if (typeof options?.x !== 'number' || typeof options?.y !== 'number')
+      throw fail('INVALID_ARGUMENT', 'x and y are required.');
+    if (!this.live?.running) throw fail('NOT_RUNNING', 'Live recognition is not running.');
+    // Browsers keep focusing on their own; there is no portable way to choose the point.
+  }
+
+  async setZoom(options: ZoomOptions): Promise<void> {
+    if (typeof options?.ratio !== 'number' || !Number.isFinite(options.ratio))
+      throw fail('INVALID_ARGUMENT', 'ratio is required.');
+    if (!this.live?.running) throw fail('NOT_RUNNING', 'Live recognition is not running.');
+    if (this.live.zoomRange().maxZoom <= 1) throw fail('UNAVAILABLE', 'This camera cannot zoom.');
+    try {
+      await this.live.setZoom(options.ratio);
+    } catch (e) {
+      throw fail('CAMERA_ERROR', messageOf(e, 'The zoom could not be changed.'));
+    }
   }
 
   async setTorch(options: { enabled: boolean }): Promise<void> {

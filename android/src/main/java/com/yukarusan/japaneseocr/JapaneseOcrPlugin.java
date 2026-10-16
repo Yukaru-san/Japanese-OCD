@@ -11,6 +11,7 @@ import android.os.Build;
 import android.provider.MediaStore;
 import androidx.activity.result.ActivityResult;
 import androidx.annotation.Nullable;
+import androidx.camera.core.ZoomState;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
@@ -77,7 +78,8 @@ public class JapaneseOcrPlugin extends Plugin {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
     @Nullable
-    private LiveCameraController live;
+    /** Written on the main thread, read from plugin call threads too. */
+    private volatile LiveCameraController live;
 
     /** The captureFrame() call waiting for its photo, so stopLiveRecognition() can reject it. */
     @Nullable
@@ -186,7 +188,7 @@ public class JapaneseOcrPlugin extends Plugin {
 
     private void openCamera(PluginCall call) {
         boolean front = "front".equals(call.getString("lensFacing", "back"));
-        long interval = call.getInt("intervalMs", 500);
+        long interval = call.getInt("intervalMs", 300);
         getActivity().runOnUiThread(() -> {
             if (live != null && live.isRunning()) {
                 call.reject("Live recognition is already running.", ALREADY_RUNNING);
@@ -204,13 +206,19 @@ public class JapaneseOcrPlugin extends Plugin {
         });
     }
 
-    /** Turns every analyzed camera frame into a `textRecognized` event. */
+    /** Turns every analyzed camera frame into a `textRecognized` event. Runs on the analysis thread. */
     private final LiveCameraController.FrameListener frameListener = new LiveCameraController.FrameListener() {
         @Override
         public void onFrame(Text text, int imageWidth, int imageHeight, @Nullable ViewMapper view, Runnable done) {
-            OcrEngine.Arranged arranged = OcrEngine.arrange(text, null);
-            notifyListeners("textRecognized", OcrEngine.toResult(arranged, imageWidth, imageHeight, view));
-            done.run();
+            try {
+                OcrEngine.Arranged arranged = OcrEngine.arrange(text, null);
+                notifyListeners("textRecognized", OcrEngine.toResult(arranged, imageWidth, imageHeight, view));
+            } catch (RuntimeException e) {
+                // One bad frame must neither crash the app nor stop the following frames.
+                onError("RECOGNITION_FAILED", errorMessage(e, "Could not process the frame"));
+            } finally {
+                done.run();
+            }
         }
 
         @Override
@@ -322,10 +330,62 @@ public class JapaneseOcrPlugin extends Plugin {
     @PluginMethod
     public void getLiveState(PluginCall call) {
         LiveCameraController controller = live;
-        JSObject result = new JSObject();
-        result.put("running", controller != null && controller.isRunning());
-        result.put("frozen", controller != null && controller.isFrozen());
-        call.resolve(result);
+        getActivity().runOnUiThread(() -> {
+            JSObject result = new JSObject();
+            boolean running = controller != null && controller.isRunning();
+            result.put("running", running);
+            result.put("frozen", running && controller.isFrozen());
+            ZoomState zoom = running ? controller.zoomState() : null;
+            if (zoom != null) {
+                result.put("zoom", zoom.getZoomRatio());
+                result.put("minZoom", zoom.getMinZoomRatio());
+                result.put("maxZoom", zoom.getMaxZoomRatio());
+            }
+            call.resolve(result);
+        });
+    }
+
+    @PluginMethod
+    public void focusAt(PluginCall call) {
+        Double x = call.getDouble("x");
+        Double y = call.getDouble("y");
+        if (x == null || y == null) {
+            call.reject("x and y are required.", INVALID_ARGUMENT);
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            if (live == null || !live.isRunning()) {
+                call.reject("Live recognition is not running.", NOT_RUNNING);
+                return;
+            }
+            if (!live.focusAt(x.floatValue(), y.floatValue())) {
+                call.reject("This camera cannot focus on a point.", UNAVAILABLE);
+                return;
+            }
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void setZoom(PluginCall call) {
+        Double ratio = call.getDouble("ratio");
+        if (ratio == null || ratio.isNaN() || ratio.isInfinite()) {
+            call.reject("ratio is required.", INVALID_ARGUMENT);
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            if (live == null || !live.isRunning()) {
+                call.reject("Live recognition is not running.", NOT_RUNNING);
+                return;
+            }
+            ZoomState zoom = live.zoomState();
+            if (zoom == null || zoom.getMaxZoomRatio() <= 1f) {
+                call.reject("This camera cannot zoom.", UNAVAILABLE);
+                return;
+            }
+            live.setZoom(ratio.floatValue());
+            call.resolve();
+        });
     }
 
     @PluginMethod

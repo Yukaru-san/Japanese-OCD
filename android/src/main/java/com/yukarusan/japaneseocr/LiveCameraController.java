@@ -16,11 +16,15 @@ import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ImageProxy;
+import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
+import androidx.camera.core.ZoomState;
+import androidx.camera.core.resolutionselector.AspectRatioStrategy;
 import androidx.camera.core.resolutionselector.ResolutionSelector;
 import androidx.camera.core.resolutionselector.ResolutionStrategy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
@@ -28,11 +32,14 @@ import androidx.camera.view.PreviewView;
 import androidx.camera.view.TransformExperimental;
 import androidx.camera.view.transform.OutputTransform;
 import androidx.core.content.ContextCompat;
+import com.google.android.gms.tasks.Task;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Shows the camera preview behind the WebView, feeds frames to the recognizer and captures
@@ -42,7 +49,10 @@ import java.util.concurrent.Executors;
 class LiveCameraController {
 
     interface FrameListener {
-        /** Called on the main thread. {@code done} must be run once the frame is fully handled. */
+        /**
+         * Called on the analysis thread, so building the result does not hold up the preview.
+         * {@code done} must be run once the frame is fully handled.
+         */
         void onFrame(Text text, int imageWidth, int imageHeight, @Nullable ViewMapper view, Runnable done);
 
         void onError(String code, String message);
@@ -59,7 +69,15 @@ class LiveCameraController {
         void onError(String message);
     }
 
-    private static final Size ANALYSIS_SIZE = new Size(1280, 720);
+    /**
+     * Full HD, so furigana (about half the height of the text they belong to) still get enough
+     * pixels per character to be recognized reliably; at 720p they often were not, and the result
+     * switched between frames with and without them.
+     */
+    private static final Size ANALYSIS_SIZE = new Size(1920, 1080);
+
+    /** How long a tap-to-focus point is kept before the camera returns to continuous autofocus. */
+    private static final long FOCUS_HOLD_SECONDS = 5;
 
     private final AppCompatActivity activity;
     private final WebView webView;
@@ -91,7 +109,7 @@ class LiveCameraController {
     private volatile boolean frozen = false;
     private volatile boolean busy = false;
     private volatile long lastFrameAt = 0;
-    private long intervalMs = 500;
+    private long intervalMs = 300;
 
     LiveCameraController(AppCompatActivity activity, WebView webView, OcrEngine ocr, FrameListener listener) {
         this.activity = activity;
@@ -139,10 +157,17 @@ class LiveCameraController {
 
         addPreviewView();
 
-        Preview preview = new Preview.Builder().build();
+        // Preview and analysis use the same 16:9 picture, so the text that is recognized is the text
+        // the user sees (with the default 4:3 preview, the two showed different parts of the scene).
+        Preview preview = new Preview.Builder()
+            .setResolutionSelector(
+                new ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY).build()
+            )
+            .build();
         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
         ResolutionSelector analysisResolution = new ResolutionSelector.Builder()
+            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
             .setResolutionStrategy(new ResolutionStrategy(ANALYSIS_SIZE, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
             .build();
         ImageAnalysis analysis = new ImageAnalysis.Builder()
@@ -209,8 +234,15 @@ class LiveCameraController {
         int height = swap ? imageProxy.getWidth() : imageProxy.getHeight();
 
         OutputTransform source = safeSource(imageProxy);
-        InputImage input = InputImage.fromMediaImage(mediaImage, rotation);
-        ocr.process(input).addOnCompleteListener(ContextCompat.getMainExecutor(activity), (task) -> {
+        Task<Text> task;
+        try {
+            task = ocr.process(InputImage.fromMediaImage(mediaImage, rotation));
+        } catch (RuntimeException e) {
+            imageProxy.close();
+            busy = false;
+            return;
+        }
+        task.addOnCompleteListener(ContextCompat.getMainExecutor(activity), (finished) -> {
             imageProxy.close();
             if (!running || frozen) {
                 busy = false;
@@ -222,7 +254,21 @@ class LiveCameraController {
                 listener.onError("RECOGNITION_FAILED", e != null ? e.getMessage() : "Recognition failed");
                 return;
             }
-            listener.onFrame(task.getResult(), width, height, ViewMapper.create(source, viewTarget()), () -> busy = false);
+            Text text = task.getResult();
+            ViewMapper view = ViewMapper.create(source, viewTarget());
+            ExecutorService executor = analysisExecutor;
+            try {
+                if (executor == null) throw new RejectedExecutionException();
+                executor.execute(() -> {
+                    if (!running || frozen) {
+                        busy = false;
+                        return;
+                    }
+                    listener.onFrame(text, width, height, view, () -> busy = false);
+                });
+            } catch (RejectedExecutionException e) {
+                busy = false; // stopped meanwhile
+            }
         });
     }
 
@@ -326,6 +372,39 @@ class LiveCameraController {
         if (camera != null) {
             camera.getCameraControl().enableTorch(enabled);
         }
+    }
+
+    /**
+     * Focuses (and meters exposure) on a point given in CSS pixels of the WebView, then returns to
+     * continuous autofocus after {@link #FOCUS_HOLD_SECONDS}. Returns {@code false} when the camera
+     * cannot focus on a point.
+     */
+    boolean focusAt(float cssX, float cssY) {
+        if (camera == null || previewView == null) return false;
+        float density = webView.getResources().getDisplayMetrics().density;
+        float x = cssX * density + webView.getLeft() - previewView.getLeft();
+        float y = cssY * density + webView.getTop() - previewView.getTop();
+        MeteringPoint point = previewView.getMeteringPointFactory().createPoint(x, y);
+        FocusMeteringAction action = new FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF | FocusMeteringAction.FLAG_AE)
+            .setAutoCancelDuration(FOCUS_HOLD_SECONDS, TimeUnit.SECONDS)
+            .build();
+        if (!camera.getCameraInfo().isFocusMeteringSupported(action)) return false;
+        camera.getCameraControl().startFocusAndMetering(action);
+        return true;
+    }
+
+    /** Current zoom state, or null before the camera is open. */
+    @Nullable
+    ZoomState zoomState() {
+        return camera == null ? null : camera.getCameraInfo().getZoomState().getValue();
+    }
+
+    /** Sets the zoom factor, clamped to what the camera supports. */
+    void setZoom(float ratio) {
+        ZoomState state = zoomState();
+        if (camera == null || state == null) return;
+        float clamped = Math.max(state.getMinZoomRatio(), Math.min(state.getMaxZoomRatio(), ratio));
+        camera.getCameraControl().setZoomRatio(clamped);
     }
 
     void stop() {
