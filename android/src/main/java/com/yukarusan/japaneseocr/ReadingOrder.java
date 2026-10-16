@@ -216,18 +216,28 @@ final class ReadingOrder {
 
         // Typical size of the main text, without the furigana pulling it down.
         double size = main.isEmpty() ? reference : percentile(thicknessesOf(lines, main, vertical), 0.5);
-        Comparator<Integer> order = readingOrder(lines, vertical, size);
-        main.sort(order);
-        layout.furigana.sort(order);
+        sortInReadingOrder(lines, main, vertical, size);
+        sortInReadingOrder(lines, layout.furigana, vertical, size);
 
         List<Ruby> readings = new ArrayList<>();
         Map<Ruby, Integer> baseLine = new HashMap<>();
         Map<Ruby, List<Integer>> baseGlyphs = new HashMap<>();
+        List<Integer> unpaired = new ArrayList<>();
         for (int index : layout.furigana) {
-            for (Ruby ruby : readingsOf(lines, index, vertical)) {
-                readings.add(ruby);
+            List<Ruby> own = readingsOf(lines, index, vertical);
+            boolean paired = false;
+            for (Ruby ruby : own) {
                 pairWithBase(lines, main, ruby, vertical, baseLine, baseGlyphs);
+                paired |= baseLine.containsKey(ruby);
             }
+            // Small kana with no kanji line below is text of its own (a caption, a button), not furigana.
+            if (paired) readings.addAll(own);
+            else unpaired.add(index);
+        }
+        if (!unpaired.isEmpty()) {
+            layout.furigana.removeAll(unpaired);
+            main.addAll(unpaired);
+            sortInReadingOrder(lines, main, vertical, size);
         }
 
         if (regions == null) {
@@ -267,6 +277,28 @@ final class ReadingOrder {
             }
             if (placed || regions == null || (line == null && inAny(regions, ruby))) {
                 layout.ruby.add(ruby);
+            }
+        }
+        dropOverlaps(layout);
+    }
+
+    /**
+     * Two readings can claim the same characters. Like {@link #segments}, keep the first by start
+     * and unplace the other, so {@code furigana} and {@code segments} agree.
+     */
+    private static void dropOverlaps(Layout layout) {
+        for (int p = 0; p < layout.paragraphs.size(); p++) {
+            List<Ruby> own = new ArrayList<>();
+            for (Ruby r : layout.ruby) if (r.paragraph == p && r.start >= 0) own.add(r);
+            own.sort(Comparator.comparingInt((Ruby r) -> r.start));
+            int cursor = 0;
+            for (Ruby r : own) {
+                if (r.start < cursor) {
+                    r.start = -1;
+                    r.end = -1;
+                } else {
+                    cursor = r.end;
+                }
             }
         }
     }
@@ -460,6 +492,8 @@ final class ReadingOrder {
             if (first < 0 || last < 0) return true;
             ruby.start = first;
             ruby.end = last + lines.get(line).glyphs.get(lastGlyph).text.length();
+            // As written in the text, so text.substring(start, end) equals base (also with a space inside).
+            ruby.base = paragraph.text.substring(ruby.start, ruby.end);
             return true;
         }
         return false;
@@ -621,23 +655,39 @@ final class ReadingOrder {
     /**
      * Horizontal: rows top to bottom, left to right within a row.
      * Vertical: columns right to left, top to bottom within a column.
+     *
+     * <p>Lines are first put into rows (columns): a line whose center is within the tolerance of
+     * the row's first line joins it. Sorting by (row, position) is a total order; comparing two
+     * lines by "same row" directly is not transitive and makes {@code List.sort} throw.
      */
-    private static Comparator<Integer> readingOrder(List<Line> lines, boolean vertical, double size) {
+    static void sortInReadingOrder(List<Line> lines, List<Integer> indexes, boolean vertical, double size) {
         double tolerance = size * SAME_ROW;
-        return (a, b) -> {
+        List<Integer> across = new ArrayList<>(indexes);
+        // Rows top to bottom (columns right to left), by center.
+        across.sort((a, b) ->
+            vertical
+                ? Double.compare(lines.get(b).centerX(), lines.get(a).centerX())
+                : Double.compare(lines.get(a).centerY(), lines.get(b).centerY())
+        );
+        Map<Integer, Integer> row = new HashMap<>();
+        int current = -1;
+        double anchor = 0;
+        for (int index : across) {
+            Line line = lines.get(index);
+            double center = vertical ? line.centerX() : line.centerY();
+            if (current < 0 || Math.abs(center - anchor) > tolerance) {
+                current++;
+                anchor = center;
+            }
+            row.put(index, current);
+        }
+        indexes.sort((a, b) -> {
+            int byRow = Integer.compare(row.get(a), row.get(b));
+            if (byRow != 0) return byRow;
             Line x = lines.get(a);
             Line y = lines.get(b);
-            if (vertical) {
-                double cx = x.centerX();
-                double cy = y.centerX();
-                if (Math.abs(cx - cy) > tolerance) return Double.compare(cy, cx);
-                return Integer.compare(x.top, y.top);
-            }
-            double rx = x.centerY();
-            double ry = y.centerY();
-            if (Math.abs(rx - ry) > tolerance) return Double.compare(rx, ry);
-            return Integer.compare(x.left, y.left);
-        };
+            return vertical ? Integer.compare(x.top, y.top) : Integer.compare(x.left, y.left);
+        });
     }
 
     private static boolean startsParagraph(Box previous, Box line, boolean vertical, double size) {

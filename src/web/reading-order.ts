@@ -158,18 +158,28 @@ export function arrange(lines: Line[], regions: Box[] | null = null): Layout {
         main.map((i) => thickness(lines[i], vertical)),
         0.5,
       );
-  const order = readingOrder(lines, vertical, size);
-  main.sort(order);
-  layout.furigana.sort(order);
+  sortInReadingOrder(lines, main, vertical, size);
+  sortInReadingOrder(lines, layout.furigana, vertical, size);
 
   const readings: Ruby[] = [];
   const baseLine = new Map<Ruby, number>();
   const baseGlyphs = new Map<Ruby, number[]>();
+  const unpaired: number[] = [];
   for (const index of layout.furigana) {
-    for (const ruby of readingsOf(lines, index, vertical)) {
-      readings.push(ruby);
+    const own = readingsOf(lines, index, vertical);
+    let paired = false;
+    for (const ruby of own) {
       pairWithBase(lines, main, ruby, vertical, baseLine, baseGlyphs);
+      paired ||= baseLine.has(ruby);
     }
+    // Small kana with no kanji line below is text of its own (a caption, a button), not furigana.
+    if (paired) readings.push(...own);
+    else unpaired.push(index);
+  }
+  if (unpaired.length) {
+    layout.furigana = layout.furigana.filter((i) => !unpaired.includes(i));
+    main.push(...unpaired);
+    sortInReadingOrder(lines, main, vertical, size);
   }
 
   if (regions == null) {
@@ -214,6 +224,26 @@ function placeReadings(
       layout.ruby.push(ruby);
     }
   }
+  dropOverlaps(layout);
+}
+
+/**
+ * Two readings can claim the same characters. Like `segments()`, keep the first by start and
+ * unplace the other, so `furigana` and `segments` agree.
+ */
+function dropOverlaps(layout: Layout): void {
+  layout.paragraphs.forEach((_, p) => {
+    const own = layout.ruby.filter((r) => r.paragraph === p && r.start >= 0).sort((a, b) => a.start - b.start);
+    let cursor = 0;
+    for (const r of own) {
+      if (r.start < cursor) {
+        r.start = -1;
+        r.end = -1;
+      } else {
+        cursor = r.end;
+      }
+    }
+  });
 }
 
 /** Joins the lines of a paragraph. Japanese lines are joined directly, Latin words with a space. */
@@ -410,6 +440,8 @@ function place(
     if (first < 0 || last < 0) return true;
     ruby.start = first;
     ruby.end = last + lines[line].glyphs[lastGlyph].text.length;
+    // As written in the text, so text.substring(start, end) equals base (also with a space inside).
+    ruby.base = paragraph.text.substring(ruby.start, ruby.end);
     return true;
   }
   return false;
@@ -546,23 +578,33 @@ function percentile(values: number[], p: number): number {
 /**
  * Horizontal: rows top to bottom, left to right within a row.
  * Vertical: columns right to left, top to bottom within a column.
+ *
+ * Lines are first put into rows (columns): a line whose center is within the tolerance of the
+ * row's first line joins it. Sorting by (row, position) is a total order; comparing two lines by
+ * "same row" directly is not transitive.
  */
-function readingOrder(lines: Line[], vertical: boolean, size: number): (a: number, b: number) => number {
+function sortInReadingOrder(lines: Line[], indexes: number[], vertical: boolean, size: number): void {
   const tolerance = size * SAME_ROW;
-  return (a, b) => {
-    const x = lines[a];
-    const y = lines[b];
-    if (vertical) {
-      const cx = x.centerX();
-      const cy = y.centerX();
-      if (Math.abs(cx - cy) > tolerance) return Math.sign(cy - cx);
-      return Math.sign(x.top - y.top);
+  // Rows top to bottom (columns right to left), by center.
+  const across = [...indexes].sort((a, b) =>
+    vertical ? lines[b].centerX() - lines[a].centerX() : lines[a].centerY() - lines[b].centerY(),
+  );
+  const row = new Map<number, number>();
+  let current = -1;
+  let anchor = 0;
+  for (const index of across) {
+    const center = vertical ? lines[index].centerX() : lines[index].centerY();
+    if (current < 0 || Math.abs(center - anchor) > tolerance) {
+      current++;
+      anchor = center;
     }
-    const rx = x.centerY();
-    const ry = y.centerY();
-    if (Math.abs(rx - ry) > tolerance) return Math.sign(rx - ry);
-    return Math.sign(x.left - y.left);
-  };
+    row.set(index, current);
+  }
+  indexes.sort((a, b) => {
+    const byRow = row.get(a)! - row.get(b)!;
+    if (byRow !== 0) return byRow;
+    return vertical ? lines[a].top - lines[b].top : lines[a].left - lines[b].left;
+  });
 }
 
 function startsParagraph(previous: Box, line: Box, vertical: boolean, size: number): boolean {
