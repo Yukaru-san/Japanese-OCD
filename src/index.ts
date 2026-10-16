@@ -10,6 +10,8 @@ export { findText } from './find-text';
 export type { TextMatch } from './find-text';
 export { toRubyHtml } from './ruby';
 export { LiveStabilizer } from './live-stabilizer';
+export { characterAt, getCharacters, getSentences } from './text-index';
+export type { CharacterAtOptions, OcrCharacter, OcrSentence } from './text-index';
 export { JapaneseOcr };
 
 const ERROR_CODES: readonly JapaneseOcrErrorCode[] = [

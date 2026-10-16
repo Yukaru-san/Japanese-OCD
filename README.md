@@ -114,6 +114,7 @@ Short examples for every method. All of them assume:
 ```ts
 import { Capacitor } from '@capacitor/core';
 import { JapaneseOcr, findText, isJapaneseOcrError, toRubyHtml } from 'capacitor-japanese-ocr';
+import { characterAt, getCharacters, getSentences } from 'capacitor-japanese-ocr';
 ```
 
 ### Check support and readiness
@@ -234,6 +235,53 @@ element and character (`symbols`, one character each) carries `viewBoundingBox` 
 be missing for the first frames, before the preview is laid out; `findText` then returns a match without
 `viewBoundingBox`.
 
+### Connect your dictionary
+
+Three functions turn a result into what a dictionary needs: single characters with their position in the text and on
+screen, the character the user tapped, and whole sentences. They work the same for both engines and for every result
+(live events, captures, gallery and images).
+
+```ts
+const chars = getCharacters(result); // every character in reading order, spaces left out
+chars[0]; // { text: '日', index: 0, block: 0, start: 0, end: 1, line: 0, boundingBox, viewBoundingBox?, furigana: 0, reading: 'にほん' }
+
+// Tap on a word in the camera picture (CSS pixels, like the event's clientX/clientY):
+const char = characterAt(result, { x: event.clientX, y: event.clientY });
+if (char) {
+  const text = result.blocks[char.block].text;
+  const entry = dictionary.longestMatch(text.slice(char.start)); // your dictionary: longest word starting here
+  showEntry(entry, char.reading); // char.reading: the furigana printed over that word, if any
+}
+
+// A tap on an image you show yourself: convert to image pixels and say so.
+const scale = result.imageWidth / img.clientWidth;
+const r = img.getBoundingClientRect();
+characterAt(result, { x: (event.clientX - r.left) * scale, y: (event.clientY - r.top) * scale }, { coordinates: 'image' });
+
+// Look up or translate whole sentences:
+for (const sentence of getSentences(result)) {
+  sentence.text;            // '日本語を勉強しています。'
+  sentence.characters;      // its characters, with readings
+  sentence.viewBoundingBox; // where it is on screen
+}
+```
+
+What to rely on:
+
+- `start`/`end` are UTF-16 indexes into `result.blocks[block].text` (like `String.slice`), the same as
+  `furigana[].start`/`end`. Characters outside the BMP (e.g. `𠮟`) are one character with `end - start === 2`.
+- `reading` is the furigana of the whole word the character belongs to (`日` and `本` of `日本` both get `にほん`);
+  `furigana` is its index in `result.furigana`, whose `start`/`end` give the word's range.
+- The text is not split into words: Japanese has no spaces, and where words end depends on your dictionary. Do a
+  longest-match lookup from the tapped character, as above. A block's `text` may contain a space between two Japanese
+  words when the recognizer saw a gap there; `getCharacters()` leaves spaces out, so join `chars[i].text` for a lookup
+  string without them.
+- A sentence ends after `。！？…` (closing brackets like `」` stay with it) or at the end of its block. Paragraph
+  blocks are cut at a change of text size or a clear gap, so a sentence never spans two blocks.
+- Indexes refer to one result. Live results are new objects for every frame; keep the result you looked up together
+  with the character.
+- A character can lack `boundingBox` when the recognizer reported no box for it; `characterAt` never returns those.
+
 ### Recognize a photo from the gallery
 
 ```ts
@@ -276,7 +324,8 @@ result.rotation;    // 90, 180 or 270 when the user rotated the image
 
 `recognizeImage({ path, selectRegion: true })` works the same for an image you already have. With your own selection
 UI, pass the boxes instead: `recognizeImage({ path, regions: [{ left, top, right, bottom }] })` (pixels of the
-upright image). Cancelling the selection screen rejects with `CANCELLED`. The screen follows the device language
+upright image as the result reports it in `imageWidth`/`imageHeight`; images over 4096 px on a side may be scaled
+down first). Cancelling the selection screen rejects with `CANCELLED`. The screen follows the device language
 (English, German, Japanese); override the `japanese_ocr_select_*` strings in your app's `strings.xml` to change it.
 
 ### Show furigana as ruby
@@ -512,6 +561,9 @@ All methods return Promises. Types are exported from the package.
 | `findText(result, text)` (function)        | `TextMatch[]`              | Position of a word in a result. Not async.               |
 | `isJapaneseOcrError(e)` (function)         | `boolean`                  | Type guard for caught errors.                            |
 | `toRubyHtml(resultOrBlock)` (function)     | `string`                   | Escaped HTML with furigana as `<ruby>`. Not async.       |
+| `getCharacters(result)` (function)         | `OcrCharacter[]`           | Every character with block, `start`/`end`, boxes and `reading`. See [Connect your dictionary](#connect-your-dictionary). |
+| `characterAt(result, { x, y }, { coordinates? }?)` (function) | `OcrCharacter \| undefined` | The character at a tap; `coordinates: 'view'` (default on live results) or `'image'`. |
+| `getSentences(result)` (function)          | `OcrSentence[]`            | `{ text, block, start, end, characters, boundingBox?, viewBoundingBox? }`. |
 | `addListener('textRecognized', fn)`        | `PluginListenerHandle`     | `fn(result: OcrResult)` for every live frame, smoothed (see [Stable results](#live-camera)). |
 | `addListener('liveRecognitionError', fn)`  | `PluginListenerHandle`     | `fn({ code, message })` when a live frame fails.         |
 | `removeAllListeners()`                     | `void`                     |                                                          |
@@ -559,6 +611,18 @@ interface OcrGeometry {
 }
 interface Rect { left: number; top: number; right: number; bottom: number }
 interface Point { x: number; y: number }
+
+// From getCharacters() / characterAt() / getSentences():
+interface OcrCharacter {
+  text: string; index: number; // index in getCharacters(result)
+  block: number; start: number; end: number; // blocks[block].text.slice(start, end) === text
+  line?: number; boundingBox?: Rect; viewBoundingBox?: Rect;
+  furigana?: number; reading?: string; // the furigana over the word this character belongs to
+}
+interface OcrSentence {
+  text: string; block: number; start: number; end: number;
+  characters: OcrCharacter[]; boundingBox?: Rect; viewBoundingBox?: Rect;
+}
 ```
 
 ## Android details
@@ -623,7 +687,7 @@ ML Kit, CameraX, Android UI         PaddleOCR on ONNX Runtime Web, getUserMedia,
 | `src/index.ts` | Package entry: creates `JapaneseOcr`, exports the types, `findText`, `toRubyHtml`, `isJapaneseOcrError`. |
 | `src/definitions.ts`, `src/handwriting.ts` | The public API: method signatures, options, result types, error codes. |
 | `src/engine-switch.ts` | Builds the `JapaneseOcr` object. Forwards each method to the native plugin or to the web engine, registers listeners with both, implements `setEngine` / `getEngine`. |
-| `src/find-text.ts`, `src/ruby.ts` | Plain helpers on a result: find a word and its box; render furigana as `<ruby>`. |
+| `src/find-text.ts`, `src/ruby.ts`, `src/text-index.ts` | Plain helpers on a result: find a word and its box; render furigana as `<ruby>`; characters, tap lookup and sentences for dictionaries (unit tests in `tests/`, `npm test`). |
 | `android/.../JapaneseOcrPlugin.java` | Android entry point. One `@PluginMethod` per API method: checks options, starts the work, resolves or rejects the call with an error code. |
 | `android/.../OcrEngine.java` | Wraps the ML Kit Japanese recognizer (with a warm-up at app start) and builds the result JSON. |
 | `android/.../ReadingOrder.java` | Reading order, paragraphs, furigana detection and pairing, regions. Plain Java, unit tested. |

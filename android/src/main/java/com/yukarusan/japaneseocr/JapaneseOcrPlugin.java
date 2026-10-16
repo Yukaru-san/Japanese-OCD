@@ -476,18 +476,24 @@ public class JapaneseOcrPlugin extends Plugin {
         boolean select = Boolean.TRUE.equals(call.getBoolean("selectRegion", false));
 
         worker.execute(() -> {
-            if (select) {
-                selectThenRecognize(call, source, imagePath);
-                return;
-            }
-            InputImage image;
+            // Throwable: an image too large for memory throws OutOfMemoryError, and the call must not hang.
             try {
-                image = uri != null ? InputImage.fromFilePath(getContext(), uri) : InputImage.fromBitmap(ImageFiles.loadBitmap(source), 0);
-            } catch (Exception e) {
-                call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
-                return;
+                if (select) {
+                    selectThenRecognize(call, source, imagePath);
+                    return;
+                }
+                InputImage image;
+                try {
+                    image =
+                        uri != null ? InputImage.fromFilePath(getContext(), uri) : InputImage.fromBitmap(ImageFiles.loadBitmap(source), 0);
+                } catch (Exception e) {
+                    call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
+                    return;
+                }
+                resolveRecognition(call, image, imagePath, regions, 0);
+            } catch (Throwable t) {
+                call.reject("Recognition failed: " + t, RECOGNITION_FAILED);
             }
-            resolveRecognition(call, image, imagePath, regions, 0);
         });
     }
 
@@ -508,20 +514,11 @@ public class JapaneseOcrPlugin extends Plugin {
                     @Override
                     public void onSelected(Bitmap image, int rotation, List<Rect> rects) {
                         worker.execute(() -> {
-                            List<ReadingOrder.Box> selected = null;
-                            if (!rects.isEmpty()) {
-                                selected = new ArrayList<>();
-                                for (Rect r : rects) selected.add(new ReadingOrder.Box(r.left, r.top, r.right, r.bottom));
+                            try {
+                                recognizeSelection(call, image, rotation, rects, imagePath);
+                            } catch (Throwable t) {
+                                call.reject("Recognition failed: " + t, RECOGNITION_FAILED);
                             }
-                            String path = imagePath;
-                            if (rotation != 0) {
-                                try {
-                                    path = ImageFiles.saveJpeg(getContext(), image, "edited");
-                                } catch (IOException e) {
-                                    // Keep the original; the coordinates then refer to the rotated image.
-                                }
-                            }
-                            resolveRecognition(call, InputImage.fromBitmap(image, 0), path, selected, rotation);
                         });
                     }
 
@@ -534,12 +531,36 @@ public class JapaneseOcrPlugin extends Plugin {
         );
     }
 
+    /** Runs on the worker: recognizes the regions the user framed in the selection screen. */
+    private void recognizeSelection(PluginCall call, Bitmap image, int rotation, List<Rect> rects, @Nullable String imagePath) {
+        List<ReadingOrder.Box> selected = null;
+        if (!rects.isEmpty()) {
+            selected = new ArrayList<>();
+            for (Rect r : rects) selected.add(new ReadingOrder.Box(r.left, r.top, r.right, r.bottom));
+        }
+        String path = imagePath;
+        if (rotation != 0) {
+            try {
+                path = ImageFiles.saveJpeg(getContext(), image, "edited");
+            } catch (IOException e) {
+                // Keep the original; the coordinates then refer to the rotated image.
+            }
+        }
+        resolveRecognition(call, InputImage.fromBitmap(image, 0), path, selected, rotation);
+    }
+
     /** Marker returned by {@link #regionsOf} after rejecting the call. */
     private static final List<ReadingOrder.Box> INVALID_REGIONS = new ArrayList<>();
 
     /** Reads `regions`: null when absent, {@link #INVALID_REGIONS} after rejecting the call. */
     @Nullable
     private static List<ReadingOrder.Box> regionsOf(PluginCall call) {
+        Object raw = call.getData().opt("regions");
+        if (raw == null || raw == JSONObject.NULL) return null;
+        if (!(raw instanceof org.json.JSONArray)) {
+            call.reject("regions must be a list of {left, top, right, bottom} in image pixels.", INVALID_ARGUMENT);
+            return INVALID_REGIONS;
+        }
         JSArray array = call.getArray("regions");
         if (array == null) return null;
         List<ReadingOrder.Box> result = new ArrayList<>();
