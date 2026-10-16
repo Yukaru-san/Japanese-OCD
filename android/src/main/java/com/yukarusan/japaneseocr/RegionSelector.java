@@ -101,6 +101,12 @@ final class RegionSelector {
             finished[0] = true;
             listener.onCancelled();
         });
+        // Closed some other way (e.g. the activity went away): still settle the call.
+        dialog.setOnDismissListener((d) -> {
+            if (finished[0]) return;
+            finished[0] = true;
+            listener.onCancelled();
+        });
 
         dialog.setContentView(root, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         dialog.show();

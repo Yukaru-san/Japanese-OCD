@@ -277,7 +277,9 @@ export interface RecognizeImageOptions {
    */
   selectRegion?: boolean;
   /**
-   * Only return text inside these boxes (pixels of the upright image), region by region.
+   * Only return text inside these boxes (pixels of the upright image), region by region. Images
+   * over 4096 px on a side may be scaled down first; the boxes are in the size the result
+   * reports as `imageWidth` × `imageHeight`.
    * Use this with your own selection UI; ignored when `selectRegion` is set.
    */
   regions?: Rect[];

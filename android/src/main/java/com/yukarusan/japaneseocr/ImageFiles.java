@@ -72,7 +72,9 @@ final class ImageFiles {
         if (degrees == 0) return bitmap;
         Matrix matrix = new Matrix();
         matrix.postRotate(degrees);
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+        Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+        if (rotated != bitmap) bitmap.recycle();
+        return rotated;
     }
 
     /** Clockwise rotation stored in the image's EXIF data, 0 when there is none. */
