@@ -18,8 +18,11 @@ async function recognizeInk(): Promise<void> {
     status.textContent = '';
     return;
   }
-  status.textContent = 'erkenne …';
   const started = performance.now();
+  const [{ ready }, { active }] = await Promise.all([JapaneseOcr.isHandwritingReady(), JapaneseOcr.getEngine()]);
+  if (request !== inkRequest) return;
+  // The first stroke downloads the model; without network that fails at once with HANDWRITING_NOT_READY.
+  status.textContent = ready || active === 'web' ? 'erkenne …' : 'lade Handschrift-Modell (einmalig ~20 MB, braucht Internet) …';
   try {
     const result = await JapaneseOcr.recognizeHandwriting({
       strokes: inkPad.strokes,
@@ -36,7 +39,8 @@ async function recognizeInk(): Promise<void> {
     $('handwriting-ready').textContent = 'geladen';
   } catch (error) {
     if (request !== inkRequest) return;
-    status.textContent = '';
+    const { code, message } = error as { code?: string; message?: string };
+    status.textContent = `Fehler${code ? ` ${code}` : ''}: ${message ?? String(error)}`;
     log('recognizeHandwriting', error);
   }
 }
