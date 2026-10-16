@@ -3,6 +3,7 @@ import { Clipboard } from '@capacitor/clipboard';
 import { JapaneseOcr, toRubyHtml } from 'capacitor-japanese-ocr';
 import type { OcrResult, TranslationOptions } from 'capacitor-japanese-ocr';
 
+import { InkPad } from './handwriting';
 import { WordOverlay, findWords } from './overlay';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -68,11 +69,15 @@ function showResult(result: OcrResult & { imagePath?: string }): void {
 async function refreshStatus(): Promise<void> {
   const support = await JapaneseOcr.isDeviceSupported();
   $('supported').textContent = support.supported
-    ? `ja (Kamera: ${support.liveCamera ? 'ja' : 'nein'}, Übersetzung: ${support.translation ? 'ja' : 'nein'})`
+    ? `ja (Kamera: ${support.liveCamera ? 'ja' : 'nein'}, Übersetzung: ${support.translation ? 'ja' : 'nein'}, ` +
+      `Handschrift: ${support.handwriting ? 'ja' : 'nein'})`
     : `nein: ${support.reason ?? ''}`;
 
   const { ready } = await JapaneseOcr.isOcrReady();
   $('ready').textContent = ready ? 'ja' : 'nein';
+
+  const handwritingReady = await JapaneseOcr.isHandwritingReady();
+  $('handwriting-ready').textContent = handwritingReady.ready ? 'geladen' : 'nicht geladen (lädt beim ersten Schreiben)';
 
   const translationReady = await JapaneseOcr.isTranslationReady({ targetLanguage: languageSelect.value });
   $('translation-ready').textContent = `${languageSelect.value}: ${translationReady.ready ? 'geladen' : 'nicht geladen'}`;
@@ -174,6 +179,56 @@ async function recognizeGallery(): Promise<void> {
   }
 }
 
+let inkPad: InkPad;
+let inkRequest = 0;
+
+/** Recognizes the drawing and lists up to 5 candidates; tapping one appends it to the text field. */
+async function recognizeInk(): Promise<void> {
+  const request = ++inkRequest;
+  const list = $('ink-candidates');
+  const status = $('ink-status');
+  if (!inkPad.strokes.length) {
+    list.textContent = '';
+    status.textContent = '';
+    return;
+  }
+  status.textContent = 'erkenne …';
+  const started = performance.now();
+  try {
+    const result = await JapaneseOcr.recognizeHandwriting({
+      strokes: inkPad.strokes,
+      width: inkPad.width,
+      height: inkPad.height,
+      preContext: $<HTMLTextAreaElement>('ink-text').value,
+    });
+    if (request !== inkRequest) return; // a newer stroke is being recognized
+    status.textContent = `${Math.round(performance.now() - started)} ms`;
+    list.textContent = '';
+    for (const candidate of result.candidates) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      const text = document.createElement('span');
+      text.textContent = candidate.text;
+      const probability = document.createElement('span');
+      probability.className = 'probability';
+      probability.textContent = `${(candidate.probability * 100).toFixed(1)} %`;
+      button.append(text, probability);
+      button.onclick = () => {
+        $<HTMLTextAreaElement>('ink-text').value += candidate.text;
+        inkPad.clear();
+      };
+      item.append(button);
+      list.append(item);
+    }
+    $('json').textContent = JSON.stringify(result, null, 2);
+    $('handwriting-ready').textContent = 'geladen';
+  } catch (error) {
+    if (request !== inkRequest) return;
+    status.textContent = '';
+    log('recognizeHandwriting', error);
+  }
+}
+
 async function copy(text: string, label: string): Promise<void> {
   if (!text) {
     log(`${label}: nichts zu kopieren`);
@@ -201,6 +256,9 @@ async function init(): Promise<void> {
     await run('prepareTranslation', () => JapaneseOcr.prepareTranslation({ targetLanguage: languageSelect.value }));
     await refreshStatus();
   };
+  inkPad = new InkPad($<HTMLCanvasElement>('ink'), () => void recognizeInk());
+  $('ink-undo').onclick = () => inkPad.undo();
+  $('ink-clear').onclick = () => inkPad.clear();
   $('start').onclick = () => void startLive();
   $('capture').onclick = () => void capture();
   $('resume').onclick = () => void resume();

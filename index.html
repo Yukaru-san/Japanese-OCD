@@ -19,6 +19,8 @@
           <dd id="ready">…</dd>
           <dt>Kamera-Berechtigung</dt>
           <dd id="permission">…</dd>
+          <dt>Handschriftmodell</dt>
+          <dd id="handwriting-ready">…</dd>
           <dt>Übersetzungsmodell</dt>
           <dd id="translation-ready">…</dd>
         </dl>
@@ -57,6 +59,18 @@
           <input type="file" id="file" accept="image/*" />
         </div>
         <label class="row"><input type="checkbox" id="select-region" checked /> Textstellen einrahmen</label>
+      </section>
+
+      <section>
+        <h2>Handschrift</h2>
+        <canvas id="ink" aria-label="Zeichenfeld"></canvas>
+        <div class="row">
+          <button id="ink-undo">Rückgängig</button>
+          <button id="ink-clear">Löschen</button>
+          <span id="ink-status" class="muted"></span>
+        </div>
+        <ol id="ink-candidates" lang="ja"></ol>
+        <textarea id="ink-text" rows="2" lang="ja" placeholder="Antippen eines Vorschlags hängt ihn hier an"></textarea>
       </section>
 
       <section>
