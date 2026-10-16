@@ -8,7 +8,6 @@ export default {
       name: 'capacitorJapaneseOcr',
       globals: {
         '@capacitor/core': 'capacitorExports',
-        'onnxruntime-web/wasm': 'ort',
       },
       sourcemap: true,
       sourcemapExcludeSources: true,
@@ -24,5 +23,5 @@ export default {
       sourcemapExcludeSources: true,
     },
   ],
-  external: ['@capacitor/core', 'onnxruntime-web/wasm'],
+  external: ['@capacitor/core'],
 };

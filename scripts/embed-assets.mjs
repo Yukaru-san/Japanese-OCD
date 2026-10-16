@@ -19,6 +19,14 @@ const write = (name, value) => writeFileSync(join(out, `${name}.js`), `export de
 write('det', readFileSync(join(root, 'web-models/ppocrv6_small_det.onnx')).toString('base64'));
 write('rec', readFileSync(join(root, 'web-models/ppocrv6_small_rec.onnx')).toString('base64'));
 write('dict', readFileSync(join(root, 'web-models/ppocrv6_small_rec_dict.txt'), 'utf8').replace(/\n$/, '').split('\n'));
+// ONNX Runtime Web (MIT), copied in so apps don't install the 140 MB onnxruntime-web package. Its
+// `new URL('ort-wasm-simd-threaded.wasm', import.meta.url)` is hidden from bundlers, which would
+// otherwise copy the 14 MB .wasm into the app although it is never fetched (wasmBinary is set).
+const runtime = readFileSync(join(ortDist, 'ort.wasm.bundle.min.mjs'), 'utf8')
+  .replace(/\n\/\/# sourceMappingURL=.*\n?$/, '\n')
+  .replaceAll('new URL("ort-wasm-simd-threaded.wasm",import.meta.url)', 'new URL("ort-wasm-simd-threaded.wasm",""+import.meta.url)');
+if (runtime.includes('"ort-wasm-simd-threaded.wasm",import.meta.url')) throw new Error('Unexpected onnxruntime-web build');
+writeFileSync(join(out, 'ort.js'), runtime);
 // The wasm compresses to a quarter; it is unpacked with DecompressionStream at load time.
 write(
   'ort-wasm',

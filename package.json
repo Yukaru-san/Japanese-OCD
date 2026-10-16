@@ -54,7 +54,8 @@
     "prettier-plugin-java": "^2.7.7",
     "rimraf": "^6.1.0",
     "rollup": "^4.53.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "onnxruntime-web": "1.30.0"
   },
   "peerDependencies": {
     "@capacitor/core": ">=8.0.0"
@@ -67,8 +68,5 @@
     "android": {
       "src": "android"
     }
-  },
-  "dependencies": {
-    "onnxruntime-web": "1.30.0"
   }
 }

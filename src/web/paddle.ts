@@ -104,7 +104,7 @@ export function loadPaddleEngine(): Promise<PaddleEngine> {
 async function createEngine(): Promise<PaddleEngine> {
   if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available in this browser.');
   const [ort, wasm, det, rec, dict] = await Promise.all([
-    import('onnxruntime-web/wasm') as Promise<Ort>,
+    import('./assets/ort.js') as Promise<Ort>,
     import('./assets/ort-wasm.js').then((m) => gunzip(decodeBase64(m.default))),
     import('./assets/det.js').then((m) => decodeBase64(m.default)),
     import('./assets/rec.js').then((m) => decodeBase64(m.default)),

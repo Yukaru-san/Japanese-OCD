@@ -477,6 +477,7 @@ interface Point { x: number; y: number }
   [PP-OCRv6_small_rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx) (Apache-2.0), stored in
   `web-models/` with their weights as float16 to halve the size (they are converted back to float32 when loaded; the
   recognized text matched the original weights in our tests). See [web-models/README.md](web-models/README.md).
-- Runtime: `onnxruntime-web` 1.30.0 (MIT), WebAssembly backend; the `.wasm` file is embedded in the JavaScript, so no
-  bundler or server configuration is needed.
+- Runtime: ONNX Runtime Web 1.30.0 (MIT), WebAssembly backend, copied into the package at build time; your app does
+  not install `onnxruntime-web`. The `.wasm` file is embedded in the JavaScript, so no bundler or server
+  configuration is needed.
 - `npm run build` turns the models into the JavaScript chunks in `dist/esm/web/assets/`.
