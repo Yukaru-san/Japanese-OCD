@@ -1,5 +1,9 @@
 import type { PermissionState, PluginListenerHandle } from '@capacitor/core';
 
+import type { HandwritingResult, PrepareHandwritingOptions, RecognizeHandwritingOptions } from './handwriting';
+
+export * from './handwriting';
+
 /**
  * Error codes used when a call is rejected.
  *
@@ -27,7 +31,9 @@ export type JapaneseOcrErrorCode =
   /** Translating the recognized text failed. */
   | 'TRANSLATION_FAILED'
   /** The user closed the photo picker without choosing an image. */
-  | 'CANCELLED';
+  | 'CANCELLED'
+  /** The handwriting model is not on the device and could not be downloaded (e.g. offline). */
+  | 'HANDWRITING_NOT_READY';
 
 /**
  * Shape of every error the plugin rejects with. Narrow a caught value with `isJapaneseOcrError()`.
@@ -44,6 +50,8 @@ export interface DeviceSupportResult {
   liveCamera: boolean;
   /** `true` when on-device translation is available. */
   translation: boolean;
+  /** `true` when handwriting recognition (`recognizeHandwriting()`) is available. */
+  handwriting: boolean;
   /** Why the device is not (fully) supported. */
   reason?: string;
 }
@@ -383,6 +391,24 @@ export interface JapaneseOcrPlugin {
    * Translates Japanese text on the device.
    */
   translateText(options: TranslateTextOptions): Promise<{ text: string; targetLanguage: string }>;
+
+  /**
+   * Recognizes handwritten Japanese from strokes and returns up to 5 candidates with probabilities.
+   * Works for single characters, words and whole sentences; a sentence may span several rows written
+   * one below the other. Write horizontally. The first call downloads the model (about 20 MB) if
+   * `prepareHandwriting()` has not done so; after that it works offline.
+   */
+  recognizeHandwriting(options: RecognizeHandwritingOptions): Promise<HandwritingResult>;
+
+  /**
+   * Downloads the Japanese handwriting model, if not on the device yet.
+   */
+  prepareHandwriting(options?: PrepareHandwritingOptions): Promise<void>;
+
+  /**
+   * Checks whether the handwriting model is downloaded. Never throws.
+   */
+  isHandwritingReady(): Promise<{ ready: boolean }>;
 
   /**
    * Fired for every analyzed live frame, also with an empty result (`text: ''`, no blocks) when no

@@ -4,6 +4,7 @@ import type {
   CaptureResult,
   DeviceSupportResult,
   GalleryResult,
+  HandwritingResult,
   JapaneseOcrPlugin,
   LiveState,
   OcrReadyResult,
@@ -18,7 +19,7 @@ const REASON = 'Japanese OCR is only supported on Android.';
  */
 export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrPlugin {
   async isDeviceSupported(): Promise<DeviceSupportResult> {
-    return { supported: false, liveCamera: false, translation: false, reason: REASON };
+    return { supported: false, liveCamera: false, translation: false, handwriting: false, reason: REASON };
   }
 
   async isOcrReady(): Promise<OcrReadyResult> {
@@ -79,6 +80,18 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrPlugin {
 
   async translateText(): Promise<{ text: string; targetLanguage: string }> {
     throw this.unsupported();
+  }
+
+  async recognizeHandwriting(): Promise<HandwritingResult> {
+    throw this.unsupported();
+  }
+
+  async prepareHandwriting(): Promise<void> {
+    throw this.unsupported();
+  }
+
+  async isHandwritingReady(): Promise<{ ready: boolean }> {
+    return { ready: false };
   }
 
   private unsupported(): CapacitorException {
