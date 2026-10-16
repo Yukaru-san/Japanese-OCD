@@ -36,7 +36,7 @@ const headers = [
     methods: promise([
       'isDeviceSupported', 'isOcrReady', 'checkPermissions', 'requestPermissions', 'startLiveRecognition',
       'stopLiveRecognition', 'captureFrame', 'resumeLiveRecognition', 'getLiveState', 'setTorch',
-      'setTranslation', 'recognizeImage', 'recognizeFromGallery', 'prepareTranslation', 'isTranslationReady', 'translateText',
+      'recognizeImage', 'recognizeFromGallery',
       'recognizeHandwriting', 'prepareHandwriting', 'isHandwritingReady', 'removeAllListeners',
     ]).concat([{ name: 'addListener', rtype: 'callback' }]),
   },
@@ -82,7 +82,6 @@ const browser = await chromium.launch();
   await marker.click();
   const popup = await page.textContent('#word-popup');
   check('tap shows own explanation for せかい', popup.includes('Welt') && popup.includes('sekai') && popup.includes('世界'), popup);
-  check('explanation does not come from ML Kit translation', (await page.evaluate(() => window.__fakeAndroid.translation)) === null);
   await page.screenshot({ path: join(shots, '2-explanation.png') });
 
   await page.click('#capture');
@@ -93,18 +92,11 @@ const browser = await chromium.launch();
   await page.click('#resume');
   check('resume unfreezes', !(await page.evaluate(() => window.__fakeAndroid.frozen)));
 
-  // Translation toggle while live
+  // Live again after a stop
   await page.click('#stop');
-  await page.selectOption('#language', 'de');
-  await page.click('#prepare-translation');
-  await page.waitForFunction(() => document.getElementById('translation-ready').textContent.includes('geladen') && !document.getElementById('translation-ready').textContent.includes('nicht'));
   await page.click('#start');
-  await page.click('#live-translate');
-  await page.waitForFunction(() => document.getElementById('live-translation').textContent.includes('Hallo, Welt'));
-  check('live translation toggles on', true, await page.textContent('#live-translation'));
-  await page.click('#live-translate');
-  await page.waitForTimeout(700);
-  check('live translation toggles off', (await page.textContent('#live-translation')) === '');
+  await page.waitForFunction(() => document.getElementById('live-text').textContent.includes('せかい'));
+  check('live restarts after stop', true);
   await page.screenshot({ path: join(shots, '3-live-again.png') });
 
   await page.click('#capture');
@@ -114,12 +106,7 @@ const browser = await chromium.launch();
   await page.waitForTimeout(100);
   check('copy puts recognized text on the clipboard', (await page.evaluate(() => window.__fakeAndroid.clipboard)) === 'こんにちは、せかい\n日本語を勉強する');
 
-  await page.click('#translate-result');
-  await page.waitForFunction(() => document.getElementById('result-translation').value !== '');
-  check('translateText on captured text', (await page.inputValue('#result-translation')).startsWith('[de]'));
-
   // Gallery
-  await page.uncheck('#translate');
   await page.fill('#result', '');
   await page.click('#gallery');
   await page.waitForFunction(() => document.getElementById('result').value !== '');
@@ -166,12 +153,6 @@ const browser = await chromium.launch();
   check('undo of the only stroke clears the candidates', true);
   check('handwriting model shown as loaded', (await page.textContent('#handwriting-ready')) === 'geladen');
 
-  // Error path: starting with translation for a language whose model is missing
-  await page.selectOption('#language', 'en');
-  await page.check('#translate');
-  await page.click('#start');
-  await page.waitForFunction(() => document.getElementById('log').textContent.includes('TRANSLATION_NOT_READY'));
-  check('missing model rejects with TRANSLATION_NOT_READY', true);
   await page.screenshot({ path: join(shots, '4-panels.png'), fullPage: true });
 
   check('android: native engine active by default', (await page.textContent('#engine-state')).includes('Nativ'));

@@ -1,17 +1,14 @@
 import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
 import { JapaneseOcr, toRubyHtml } from 'capacitor-japanese-ocr';
-import type { EngineOptions, OcrResult, TranslationOptions } from 'capacitor-japanese-ocr';
+import type { EngineOptions, OcrResult } from 'capacitor-japanese-ocr';
 
 import { InkPad } from './handwriting';
 import { WordOverlay, findWords } from './overlay';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const translateBox = $<HTMLInputElement>('translate');
-const languageSelect = $<HTMLSelectElement>('language');
 const resultText = $<HTMLTextAreaElement>('result');
-const resultTranslation = $<HTMLTextAreaElement>('result-translation');
 const capturedImage = $<HTMLImageElement>('captured-image');
 const logEl = $('log');
 const overlay = new WordOverlay($('word-layer'), $('word-popup'));
@@ -32,10 +29,6 @@ function selectRegion(): boolean {
   return $<HTMLInputElement>('select-region').checked;
 }
 
-function translation(): TranslationOptions {
-  return { enabled: translateBox.checked, targetLanguage: languageSelect.value };
-}
-
 /** Runs a plugin call, logs its outcome and never throws. */
 async function run<T>(label: string, fn: () => Promise<T>): Promise<T | undefined> {
   try {
@@ -50,7 +43,6 @@ async function run<T>(label: string, fn: () => Promise<T>): Promise<T | undefine
 
 function showResult(result: OcrResult & { imagePath?: string }): void {
   resultText.value = result.text;
-  resultTranslation.value = result.translatedText ?? '';
   $('json').textContent = JSON.stringify(result, null, 2);
   // Text with its furigana as <ruby>; toRubyHtml escapes the text.
   $('result-ruby').innerHTML = result.furigana?.length ? toRubyHtml(result) : '';
@@ -104,7 +96,7 @@ async function changeEngine(engine: EngineOptions['engine']): Promise<void> {
 async function refreshStatus(): Promise<void> {
   const support = await JapaneseOcr.isDeviceSupported();
   $('supported').textContent = support.supported
-    ? `ja (Kamera: ${support.liveCamera ? 'ja' : 'nein'}, Übersetzung: ${support.translation ? 'ja' : 'nein'}, ` +
+    ? `ja (Kamera: ${support.liveCamera ? 'ja' : 'nein'}, ` +
       `Handschrift: ${support.handwriting ? 'ja' : 'nein'})`
     : `nein: ${support.reason ?? ''}`;
   if (support.engine) $('supported').textContent += ` · Engine: ${support.engine}`;
@@ -114,9 +106,6 @@ async function refreshStatus(): Promise<void> {
 
   const handwritingReady = await JapaneseOcr.isHandwritingReady();
   $('handwriting-ready').textContent = handwritingReady.ready ? 'geladen' : 'nicht geladen (lädt beim ersten Schreiben)';
-
-  const translationReady = await JapaneseOcr.isTranslationReady({ targetLanguage: languageSelect.value });
-  $('translation-ready').textContent = `${languageSelect.value}: ${translationReady.ready ? 'geladen' : 'nicht geladen'}`;
 
   try {
     const permission = await JapaneseOcr.checkPermissions();
@@ -132,16 +121,14 @@ function setLive(live: boolean): void {
   $('capture').hidden = false;
   $('resume').hidden = true;
   $('live-text').textContent = '';
-  $('live-translation').textContent = '';
   $('live-words').textContent = '';
   overlay.clear();
-  $('live-translate').textContent = translateBox.checked ? 'Übersetzung aus' : 'Übersetzung an';
   torchOn = false;
 }
 
 async function startLive(): Promise<void> {
   try {
-    await JapaneseOcr.startLiveRecognition({ intervalMs: 400, translation: translation() });
+    await JapaneseOcr.startLiveRecognition({ intervalMs: 400 });
     setLive(true);
     log('startLiveRecognition ok');
   } catch (error) {
@@ -154,7 +141,6 @@ async function capture(): Promise<void> {
   if (!result) return;
   showResult(result);
   $('live-text').textContent = result.text || '(kein Text erkannt)';
-  $('live-translation').textContent = result.translatedText ?? '';
   showLiveWords(overlay.render(result));
   $('capture').hidden = true;
   $('resume').hidden = false;
@@ -176,17 +162,6 @@ async function stopLive(): Promise<void> {
   setLive(false);
 }
 
-async function toggleLiveTranslation(): Promise<void> {
-  const enable = !translateBox.checked;
-  const ok = await run(`setTranslation(${enable})`, () =>
-    JapaneseOcr.setTranslation({ enabled: enable, targetLanguage: languageSelect.value }).then(() => true),
-  );
-  if (!ok) return;
-  translateBox.checked = enable;
-  $('live-translate').textContent = enable ? 'Übersetzung aus' : 'Übersetzung an';
-  if (!enable) $('live-translation').textContent = '';
-}
-
 async function recognizeFile(file: File): Promise<void> {
   const base64 = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -196,7 +171,7 @@ async function recognizeFile(file: File): Promise<void> {
   });
   try {
     const started = performance.now();
-    const result = await JapaneseOcr.recognizeImage({ base64, translation: translation(), selectRegion: selectRegion() });
+    const result = await JapaneseOcr.recognizeImage({ base64, selectRegion: selectRegion() });
     showResult(result);
     log(`recognizeImage ok (${Math.round(performance.now() - started)} ms)`);
   } catch (error) {
@@ -208,7 +183,7 @@ async function recognizeFile(file: File): Promise<void> {
 async function recognizeGallery(): Promise<void> {
   try {
     const started = performance.now();
-    const result = await JapaneseOcr.recognizeFromGallery({ translation: translation(), selectRegion: selectRegion() });
+    const result = await JapaneseOcr.recognizeFromGallery({ selectRegion: selectRegion() });
     showResult(result);
     log(`recognizeFromGallery ok (${Math.round(performance.now() - started)} ms)`);
   } catch (error) {
@@ -284,7 +259,6 @@ async function init(): Promise<void> {
 
   await JapaneseOcr.addListener('textRecognized', (result) => {
     $('live-text').textContent = result.text;
-    $('live-translation').textContent = result.translatedText ?? '';
     showLiveWords(overlay.render(result));
   });
   await JapaneseOcr.addListener('liveRecognitionError', (error) => log('live', error));
@@ -292,12 +266,6 @@ async function init(): Promise<void> {
   $('refresh').onclick = () => void refreshStatus();
   $('request-permission').onclick = async () => {
     await run('requestPermissions', () => JapaneseOcr.requestPermissions());
-    await refreshStatus();
-  };
-  languageSelect.onchange = () => void refreshStatus();
-  $('prepare-translation').onclick = async () => {
-    log(`Lade Modell ja → ${languageSelect.value} …`);
-    await run('prepareTranslation', () => JapaneseOcr.prepareTranslation({ targetLanguage: languageSelect.value }));
     await refreshStatus();
   };
   inkPad = new InkPad($<HTMLCanvasElement>('ink'), () => void recognizeInk());
@@ -311,20 +279,12 @@ async function init(): Promise<void> {
     const ok = await run(`setTorch(${!torchOn})`, () => JapaneseOcr.setTorch({ enabled: !torchOn }).then(() => true));
     if (ok) torchOn = !torchOn;
   };
-  $('live-translate').onclick = () => void toggleLiveTranslation();
   $('gallery').onclick = () => void recognizeGallery();
   $<HTMLInputElement>('file').onchange = (event) => {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (file) void recognizeFile(file);
   };
   $('copy').onclick = () => void copy(resultText.value, 'Text kopiert');
-  $('copy-translation').onclick = () => void copy(resultTranslation.value, 'Übersetzung kopiert');
-  $('translate-result').onclick = async () => {
-    const result = await run('translateText', () =>
-      JapaneseOcr.translateText({ text: resultText.value, targetLanguage: languageSelect.value }),
-    );
-    if (result) resultTranslation.value = result.text;
-  };
 
   await refreshStatus();
   // The recognizer warms up in the background; show when it becomes ready.
