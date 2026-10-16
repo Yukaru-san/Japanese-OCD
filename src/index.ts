@@ -29,6 +29,7 @@ const ERROR_CODES: readonly JapaneseOcrErrorCode[] = [
   'TRANSLATION_NOT_READY',
   'TRANSLATION_FAILED',
   'CANCELLED',
+  'HANDWRITING_NOT_READY',
 ];
 
 /**

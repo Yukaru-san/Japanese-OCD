@@ -6,6 +6,8 @@ Japanese text recognition (OCR) for Capacitor apps, on the device, with Google M
 - **Capture:** freeze the picture and get its text, optionally the photo as a file.
 - **Gallery & images:** let the user pick a photo from the gallery, or pass an image (file path or base64), and
   optionally let them rotate it and frame the text they want.
+- **Handwriting:** the user writes in a drawing area, you get up to 5 candidate words or sentences with their
+  probability.
 - **Translation (optional):** Japanese → another language, on the device, switchable at any time.
 - **Positions:** every block, line and character comes with its position on screen, so you can draw your own
   highlights or buttons over recognized words.
@@ -13,7 +15,7 @@ Japanese text recognition (OCR) for Capacitor apps, on the device, with Google M
 | Platform | Support                                                                                         |
 | -------- | ----------------------------------------------------------------------------------------------- |
 | Android  | Yes, Android 7.0 (API 24) or newer                                                              |
-| Web, iOS | No. `isDeviceSupported()`, `isOcrReady()` and `isTranslationReady()` return `false`, every other call throws `UNAVAILABLE` |
+| Web, iOS | No. `isDeviceSupported()`, `isOcrReady()`, `isTranslationReady()` and `isHandwritingReady()` return `false`, every other call throws `UNAVAILABLE` |
 
 Requires Capacitor 8.
 
@@ -201,6 +203,61 @@ UI, pass the boxes instead: `recognizeImage({ path, regions: [{ left, top, right
 upright image). Cancelling the selection screen rejects with `CANCELLED`. The screen follows the device language
 (English, German, Japanese); override the `japanese_ocr_select_*` strings in your app's `strings.xml` to change it.
 
+### Recognize handwriting
+
+Let the user write with a finger or pen and get up to 5 candidates with their probability. Works for single
+characters, words and whole sentences. The plugin takes the strokes; the drawing area is yours, e.g. a `<canvas>`:
+
+```ts
+import { JapaneseOcr, type InkStroke } from 'capacitor-japanese-ocr';
+
+const canvas = document.querySelector('canvas')!;
+const ctx = canvas.getContext('2d')!;
+const strokes: InkStroke[] = [];
+let timer: number | undefined;
+
+canvas.style.touchAction = 'none'; // keep the page from scrolling while writing
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  strokes.push({ points: [{ x: e.offsetX, y: e.offsetY, t: Date.now() }] });
+  ctx.beginPath();
+  ctx.moveTo(e.offsetX, e.offsetY);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!canvas.hasPointerCapture(e.pointerId)) return;
+  strokes[strokes.length - 1].points.push({ x: e.offsetX, y: e.offsetY, t: Date.now() });
+  ctx.lineTo(e.offsetX, e.offsetY);
+  ctx.stroke();
+});
+canvas.addEventListener('pointerup', () => {
+  clearTimeout(timer);
+  timer = window.setTimeout(recognize, 300); // recognize shortly after each stroke
+});
+
+async function recognize(): Promise<void> {
+  const result = await JapaneseOcr.recognizeHandwriting({
+    strokes,
+    width: canvas.clientWidth,
+    height: canvas.clientHeight,
+  });
+  // result.candidates: [{ text: '日本語', probability: 0.82, score: 1.9 }, ...], best first
+  list.innerHTML = result.candidates
+    .map((c) => `<li>${c.text} ${Math.round(c.probability * 100)} %</li>`)
+    .join('');
+}
+```
+
+- **Model:** the handwriting model (~20 MB) is downloaded on the first `recognizeHandwriting()` and then works
+  offline. Call `prepareHandwriting()` earlier (e.g. on the screen with the drawing area) to avoid the wait;
+  `isHandwritingReady()` tells whether it is on the device. Without network on first use, the call throws
+  `HANDWRITING_NOT_READY`.
+- **Sentences:** write horizontally. A sentence may continue on the next row below; rows are recognized one after
+  the other and joined. Pass already accepted text as `preContext` to improve the next characters.
+- **Probability** is relative to the returned candidates (they add up to 1), so it says how sure the recognizer is
+  of the first candidate compared to the others. `score` is the recognizer's raw value (lower is better).
+- No strokes returns `{ text: '', candidates: [] }`. Coordinates can be in any unit; `width` and `height` in the
+  same unit help to tell small kana (っ, ゃ) from big ones.
+
 ### Recognize an existing image
 
 ```ts
@@ -265,6 +322,7 @@ Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to
 | `TRANSLATION_NOT_READY` | The translation model is not downloaded. Call `prepareTranslation()`. |
 | `TRANSLATION_FAILED`    | Translating failed.                                           |
 | `CANCELLED`             | The user closed the photo picker or the selection screen.     |
+| `HANDWRITING_NOT_READY` | The handwriting model is missing and could not be downloaded (offline?). |
 
 ## API
 
@@ -272,7 +330,7 @@ All methods return Promises. Types are exported from the package.
 
 | Method                                     | Returns                    | Notes                                                    |
 | ------------------------------------------ | -------------------------- | -------------------------------------------------------- |
-| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, translation, reason? }`. Never throws. |
+| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, translation, handwriting, reason? }`. Never throws. |
 | `isOcrReady()`                             | `{ ready }`                | Never throws.                                            |
 | `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
 | `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (500), translation?: { enabled, targetLanguage? } }` |
@@ -286,6 +344,9 @@ All methods return Promises. Types are exported from the package.
 | `recognizeFromGallery({ translation?, selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating). |
 | `prepareTranslation({ targetLanguage?, requireWifi? })` | `void`        | Downloads the model if needed.                           |
 | `isTranslationReady({ targetLanguage? })`  | `{ ready }`                | Never throws.                                            |
+| `recognizeHandwriting({ strokes, width?, height?, preContext?, maxResults? })` | `{ text, candidates }` | `strokes: { points: { x, y, t? }[] }[]`; up to 5 `{ text, probability, score }`, best first. |
+| `prepareHandwriting({ requireWifi? })`     | `void`                     | Downloads the handwriting model if needed.               |
+| `isHandwritingReady()`                     | `{ ready }`                | Never throws.                                            |
 | `findText(result, text)` (function)        | `TextMatch[]`              | Position of a word in a result. Not async.               |
 | `isJapaneseOcrError(e)` (function)         | `boolean`                  | Type guard for caught errors.                            |
 | `toRubyHtml(resultOrBlock)` (function)     | `string`                   | Escaped HTML with furigana as `<ruby>`. Not async.       |
@@ -342,9 +403,9 @@ interface Point { x: number; y: number }
 
 ## Android details
 
-- Added to your manifest automatically: `CAMERA`, `INTERNET` and `ACCESS_NETWORK_STATE` (translation model
-  download), and `android.hardware.camera.any` as not required, so devices without camera can still install.
+- Added to your manifest automatically: `CAMERA`, `INTERNET` and `ACCESS_NETWORK_STATE` (translation and
+  handwriting model download), and `android.hardware.camera.any` as not required, so devices without camera can still install.
 - The Japanese model adds a few MB per CPU architecture to the app.
 - Release builds with R8/minify need no extra rules.
 - Library versions can be overridden in your app's `android/variables.gradle`: `cameraxVersion`,
-  `mlkitTextRecognitionJapaneseVersion`, `mlkitTranslateVersion`.
+  `mlkitTextRecognitionJapaneseVersion`, `mlkitTranslateVersion`, `mlkitDigitalInkVersion`.

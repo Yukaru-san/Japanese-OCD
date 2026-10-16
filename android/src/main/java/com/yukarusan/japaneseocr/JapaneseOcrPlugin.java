@@ -61,11 +61,13 @@ public class JapaneseOcrPlugin extends Plugin {
     private static final String TRANSLATION_NOT_READY = "TRANSLATION_NOT_READY";
     private static final String TRANSLATION_FAILED = "TRANSLATION_FAILED";
     private static final String CANCELLED = "CANCELLED";
+    private static final String HANDWRITING_NOT_READY = "HANDWRITING_NOT_READY";
 
     private static final int MIN_SDK = 24;
 
     private final OcrEngine ocr = new OcrEngine();
     private final TranslationEngine translation = new TranslationEngine();
+    private final HandwritingEngine handwriting = new HandwritingEngine();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
     @Nullable
@@ -90,6 +92,7 @@ public class JapaneseOcrPlugin extends Plugin {
         stopLive();
         ocr.close();
         translation.close();
+        handwriting.close();
         worker.shutdown();
     }
 
@@ -123,6 +126,7 @@ public class JapaneseOcrPlugin extends Plugin {
         result.put("supported", supported);
         result.put("liveCamera", camera);
         result.put("translation", supported);
+        result.put("handwriting", Build.VERSION.SDK_INT >= MIN_SDK);
         if (reason != null) result.put("reason", reason);
         call.resolve(result);
     }
@@ -802,6 +806,121 @@ public class JapaneseOcrPlugin extends Plugin {
                 call.resolve(result);
             });
         });
+    }
+
+    // Handwriting
+
+    private static final int MAX_CANDIDATES = 5;
+
+    @PluginMethod
+    public void isHandwritingReady(PluginCall call) {
+        if (Build.VERSION.SDK_INT < MIN_SDK) {
+            JSObject result = new JSObject();
+            result.put("ready", false);
+            call.resolve(result);
+            return;
+        }
+        handwriting.isReady().addOnCompleteListener((task) -> {
+            JSObject result = new JSObject();
+            result.put("ready", task.isSuccessful() && Boolean.TRUE.equals(task.getResult()));
+            call.resolve(result);
+        });
+    }
+
+    @PluginMethod
+    public void prepareHandwriting(PluginCall call) {
+        if (Build.VERSION.SDK_INT < MIN_SDK) {
+            call.reject("Android " + MIN_SDK + " (API level) or newer is required.", UNAVAILABLE);
+            return;
+        }
+        handwriting.download(call.getBoolean("requireWifi", false)).addOnCompleteListener((task) -> {
+            if (task.isSuccessful()) {
+                call.resolve();
+            } else {
+                call.reject(
+                    "Downloading the handwriting model failed: " + errorMessage(task.getException(), "unknown error"),
+                    HANDWRITING_NOT_READY
+                );
+            }
+        });
+    }
+
+    @PluginMethod
+    public void recognizeHandwriting(PluginCall call) {
+        if (Build.VERSION.SDK_INT < MIN_SDK) {
+            call.reject("Android " + MIN_SDK + " (API level) or newer is required.", UNAVAILABLE);
+            return;
+        }
+        List<HandwritingEngine.Stroke> strokes;
+        try {
+            strokes = parseStrokes(call.getArray("strokes"));
+        } catch (JSONException | IllegalArgumentException e) {
+            call.reject("strokes must be an array of { points: { x, y, t? }[] }: " + e.getMessage(), INVALID_ARGUMENT);
+            return;
+        }
+        int limit = Math.max(1, Math.min(MAX_CANDIDATES, call.getInt("maxResults", MAX_CANDIDATES)));
+        String preContext = call.getString("preContext", "");
+        float width = call.getFloat("width", 0f);
+        float height = call.getFloat("height", 0f);
+        if (strokes.isEmpty()) {
+            call.resolve(candidatesResult(Collections.emptyList()));
+            return;
+        }
+        // Downloads the model on first use; no-op once it is on the device.
+        handwriting.download(false).addOnCompleteListener((download) -> {
+            if (!download.isSuccessful()) {
+                call.reject(
+                    "The handwriting model is not on the device and could not be downloaded: " +
+                        errorMessage(download.getException(), "unknown error"),
+                    HANDWRITING_NOT_READY
+                );
+                return;
+            }
+            handwriting.recognize(strokes, preContext == null ? "" : preContext, width, height, limit).addOnCompleteListener((task) -> {
+                if (task.isSuccessful()) {
+                    call.resolve(candidatesResult(task.getResult()));
+                } else {
+                    call.reject(errorMessage(task.getException(), "Recognition failed"), RECOGNITION_FAILED);
+                }
+            });
+        });
+    }
+
+    private static List<HandwritingEngine.Stroke> parseStrokes(@Nullable JSArray array) throws JSONException {
+        if (array == null) throw new IllegalArgumentException("strokes is missing");
+        List<HandwritingEngine.Stroke> strokes = new ArrayList<>();
+        for (int i = 0; i < array.length(); i++) {
+            org.json.JSONArray points = array.getJSONObject(i).getJSONArray("points");
+            if (points.length() == 0) continue;
+            float[] x = new float[points.length()];
+            float[] y = new float[points.length()];
+            Long[] t = new Long[points.length()];
+            for (int j = 0; j < points.length(); j++) {
+                JSONObject point = points.getJSONObject(j);
+                x[j] = (float) point.getDouble("x");
+                y[j] = (float) point.getDouble("y");
+                if (Float.isNaN(x[j]) || Float.isNaN(y[j])) throw new IllegalArgumentException("x and y must be numbers");
+                t[j] = point.has("t") && !point.isNull("t") ? Math.round(point.getDouble("t")) : null;
+            }
+            strokes.add(new HandwritingEngine.Stroke(x, y, t));
+        }
+        return strokes;
+    }
+
+    private static JSObject candidatesResult(List<InkLines.Candidate> candidates) {
+        double[] probabilities = InkLines.probabilities(candidates);
+        JSArray list = new JSArray();
+        for (int i = 0; i < candidates.size(); i++) {
+            JSObject c = new JSObject();
+            c.put("text", candidates.get(i).text);
+            c.put("score", candidates.get(i).score);
+            c.put("probability", probabilities[i]);
+            list.put(c);
+        }
+        JSObject result = new JSObject();
+        result.put("text", candidates.isEmpty() ? "" : candidates.get(0).text);
+        result.put("candidates", list);
+        return result;
     }
 
     // Errors
