@@ -27,8 +27,7 @@
     "ocr",
     "japanese",
     "ml-kit",
-    "text-recognition",
-    "translation"
+    "text-recognition"
   ],
   "scripts": {
     "verify": "npm run verify:android && npm run verify:web",

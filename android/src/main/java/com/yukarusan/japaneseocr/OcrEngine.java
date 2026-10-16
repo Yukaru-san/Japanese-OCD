@@ -87,14 +87,6 @@ class OcrEngine {
 
         /** Lines ML Kit returned without a box; only used when no regions are given. */
         final List<Text.Line> unboxed = new ArrayList<>();
-
-        /** Text of every paragraph (result block) in reading order. */
-        List<String> texts() {
-            List<String> result = new ArrayList<>();
-            for (ReadingOrder.Paragraph paragraph : layout.paragraphs) result.add(paragraph.text);
-            for (Text.Line line : unboxed) result.add(line.getText());
-            return result;
-        }
     }
 
     /**
@@ -136,21 +128,11 @@ class OcrEngine {
      * Builds the JS result. Blocks are paragraphs in reading order; furigana are returned
      * separately and are not part of {@code text}, and each block lists its text split into
      * segments with their readings.
-     *
-     * @param translations one entry per block, or null when translation is off
      */
-    static JSObject toResult(
-        Arranged arranged,
-        int imageWidth,
-        int imageHeight,
-        @Nullable List<String> translations,
-        @Nullable String targetLanguage,
-        @Nullable ViewMapper view
-    ) {
+    static JSObject toResult(Arranged arranged, int imageWidth, int imageHeight, @Nullable ViewMapper view) {
         ReadingOrder.Layout layout = arranged.layout;
         JSArray blocks = new JSArray();
         StringBuilder allText = new StringBuilder();
-        StringBuilder allTranslated = new StringBuilder();
 
         int count = layout.paragraphs.size() + arranged.unboxed.size();
         for (int i = 0; i < count; i++) {
@@ -180,12 +162,6 @@ class OcrEngine {
                 blockObj.put("segments", segmentsToJson(Collections.singletonList(new ReadingOrder.Segment(paragraphText, null))));
             }
             blockObj.put("text", paragraphText);
-
-            if (translations != null && i < translations.size()) {
-                blockObj.put("translatedText", translations.get(i));
-                if (allTranslated.length() > 0) allTranslated.append('\n');
-                allTranslated.append(translations.get(i));
-            }
             blockObj.put("lines", lines);
             blocks.put(blockObj);
 
@@ -210,10 +186,6 @@ class OcrEngine {
 
         JSObject result = new JSObject();
         result.put("text", allText.toString());
-        if (translations != null) {
-            result.put("translatedText", allTranslated.toString());
-            result.put("targetLanguage", targetLanguage);
-        }
         result.put("blocks", blocks);
         result.put("furigana", furigana);
         result.put("vertical", layout.vertical);
