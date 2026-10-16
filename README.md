@@ -9,7 +9,6 @@ built-in PaddleOCR engine in the browser (web, iOS WebView, or on Android when y
   optionally let them rotate it and frame the text they want.
 - **Handwriting:** the user writes in a drawing area, you get up to 5 candidate words or sentences with their
   probability.
-- **Translation (optional):** Japanese → another language, on the device, switchable at any time.
 - **Positions:** every block, line and character comes with its position on screen, so you can draw your own
   highlights or buttons over recognized words.
 
@@ -136,7 +135,7 @@ in CSS pixels relative to the WebView, so a `position: fixed` element at those v
 import { JapaneseOcr, findText } from 'capacitor-japanese-ocr';
 
 const marker = document.querySelector<HTMLButtonElement>('#marker')!; // position: fixed; hidden by default
-marker.onclick = () => alert('せかい (sekai): Welt'); // your own explanation, no translation involved
+marker.onclick = () => alert('せかい (sekai): Welt'); // your own explanation
 
 await JapaneseOcr.addListener('textRecognized', (result) => {
   const box = findText(result, 'せかい')[0]?.viewBoundingBox;
@@ -156,22 +155,6 @@ await JapaneseOcr.addListener('textRecognized', (result) => {
 element and character (`symbols`, one character each) carries `viewBoundingBox` as well. On live results it can
 be missing for the first frames, before the preview is laid out; `findText` then returns a match without
 `viewBoundingBox`.
-
-### Translate
-
-Translation needs a language model (~30 MB) that is downloaded once:
-
-```ts
-await JapaneseOcr.prepareTranslation({ targetLanguage: 'de' }); // download once, e.g. in settings
-await JapaneseOcr.startLiveRecognition({ translation: { enabled: true, targetLanguage: 'de' } });
-// result.translatedText and block.translatedText are now set
-
-await JapaneseOcr.setTranslation({ enabled: false }); // switch off while live
-const { text } = await JapaneseOcr.translateText({ text: 'こんにちは', targetLanguage: 'de' });
-```
-
-Target languages are BCP-47 codes supported by ML Kit (`en`, `de`, `fr`, `es`, `ko`, `zh`, ...). Default: `en`.
-Using a language whose model is not downloaded throws `TRANSLATION_NOT_READY`.
 
 ### Recognize a photo from the gallery
 
@@ -356,7 +339,6 @@ The choice is not stored; call `setEngine()` again after the app starts if you w
 | Gallery | Opens the browser's file picker. `imagePath` is a `blob:` URL. Cancelling throws `CANCELLED` (in browsers that report it; otherwise when the window gets focus back without a file). |
 | `recognizeImage` | `base64`, or `path` as any URL the page can `fetch()` (`https:`, relative, `blob:`, `data:`). `file://` and `content://` paths don't work in the browser. |
 | Selection screen | `selectRegion: true` shows the same rotate/frame screen, as HTML. |
-| Translation | Uses the browser's built-in on-device Translator API (Chrome 138+ on desktop). Without it, translation calls throw `UNAVAILABLE` and `isDeviceSupported().translation` is `false`. If the browser does not answer within 5 s (e.g. headless Chrome), the language counts as not ready: `isTranslationReady()` returns `false`, translating throws `TRANSLATION_NOT_READY`. `prepareTranslation()` downloads the language pack (the browser may require a tap first); `requireWifi` is ignored. |
 | Handwriting | Recognized with the PaddleOCR recognizer, limited to Japanese characters, up to 5 candidates with probabilities. Noticeably less accurate than ML Kit's handwriting model, best with neat, upright characters; `preContext` is ignored. `prepareHandwriting()` only loads the OCR models. |
 
 ### Limits
@@ -377,7 +359,7 @@ Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to
 
 | Code                    | Meaning                                                       |
 | ----------------------- | ------------------------------------------------------------- |
-| `UNAVAILABLE`           | Not supported here: no camera, no flash, no translation in this browser, no WebAssembly, or `setEngine({ engine: 'native' })` without a native engine. |
+| `UNAVAILABLE`           | Not supported here: no camera, no flash, no WebAssembly, or `setEngine({ engine: 'native' })` without a native engine. |
 | `NOT_READY`             | The recognizer failed to load on this device (web: the models could not be loaded). Retrying won't help. |
 | `PERMISSION_DENIED`     | The camera permission was refused.                            |
 | `CAMERA_ERROR`          | The camera could not be opened or a photo failed.             |
@@ -385,8 +367,6 @@ Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to
 | `NOT_RUNNING`           | The call needs a running live recognition.                    |
 | `INVALID_ARGUMENT`      | A required option is missing or invalid.                      |
 | `RECOGNITION_FAILED`    | The image could not be loaded or recognized.                  |
-| `TRANSLATION_NOT_READY` | The translation model is not downloaded. Call `prepareTranslation()`. |
-| `TRANSLATION_FAILED`    | Translating failed.                                           |
 | `CANCELLED`             | The user closed the photo picker or the selection screen.     |
 | `HANDWRITING_NOT_READY` | The handwriting model is missing and could not be downloaded (offline?). Web: the OCR models failed to load. |
 
@@ -398,27 +378,23 @@ All methods return Promises. Types are exported from the package.
 | ------------------------------------------ | -------------------------- | -------------------------------------------------------- |
 | `setEngine({ engine })`                    | `void`                     | `'auto'`, `'native'` or `'web'`. See [Web engine](#web-engine). |
 | `getEngine()`                              | `{ engine, active, nativeAvailable }` | `active` is `'native'` or `'web'`.              |
-| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, translation, handwriting, engine, reason? }`. Never throws. |
+| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws. |
 | `isOcrReady()`                             | `{ ready }`                | Never throws.                                            |
 | `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
-| `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (500), translation?: { enabled, targetLanguage? } }` |
+| `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (500) }` |
 | `stopLiveRecognition()`                    | `void`                     |                                                          |
 | `captureFrame(options?)`                   | `CaptureResult`            | `{ saveImage?: boolean }`. With `saveImage`, `imagePath` is a `file://` path; show it with `Capacitor.convertFileSrc()` (web engine: a `blob:` URL). |
 | `resumeLiveRecognition()`                  | `void`                     |                                                          |
-| `getLiveState()`                           | `{ running, frozen, translation }` |                                                  |
+| `getLiveState()`                           | `{ running, frozen }`      |                                                          |
 | `setTorch({ enabled })`                    | `void`                     |                                                          |
-| `setTranslation({ enabled, targetLanguage? })` | `void`                 |                                                          |
-| `recognizeImage({ path?, base64?, translation?, selectRegion?, regions? })` | `OcrResult` | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes. |
-| `recognizeFromGallery({ translation?, selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating; web engine: `blob:`). |
-| `prepareTranslation({ targetLanguage?, requireWifi? })` | `void`        | Downloads the model if needed.                           |
-| `isTranslationReady({ targetLanguage? })`  | `{ ready }`                | Never throws.                                            |
+| `recognizeImage({ path?, base64?, selectRegion?, regions? })` | `OcrResult` | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes. |
+| `recognizeFromGallery({ selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating; web engine: `blob:`). |
 | `recognizeHandwriting({ strokes, width?, height?, preContext?, maxResults? })` | `{ text, candidates }` | `strokes: { points: { x, y, t? }[] }[]`; up to 5 `{ text, probability, score }`, best first. |
 | `prepareHandwriting({ requireWifi? })`     | `void`                     | Downloads the handwriting model if needed.               |
 | `isHandwritingReady()`                     | `{ ready }`                | Never throws.                                            |
 | `findText(result, text)` (function)        | `TextMatch[]`              | Position of a word in a result. Not async.               |
 | `isJapaneseOcrError(e)` (function)         | `boolean`                  | Type guard for caught errors.                            |
 | `toRubyHtml(resultOrBlock)` (function)     | `string`                   | Escaped HTML with furigana as `<ruby>`. Not async.       |
-| `translateText({ text, targetLanguage? })` | `{ text, targetLanguage }` |                                                          |
 | `addListener('textRecognized', fn)`        | `PluginListenerHandle`     | `fn(result: OcrResult)` for every live frame.            |
 | `addListener('liveRecognitionError', fn)`  | `PluginListenerHandle`     | `fn({ code, message })` when a live frame fails.         |
 | `removeAllListeners()`                     | `void`                     |                                                          |
@@ -428,8 +404,6 @@ All methods return Promises. Types are exported from the package.
 ```ts
 interface OcrResult {
   text: string;              // all text in reading order, paragraphs separated by "\n", no furigana
-  translatedText?: string;   // only with translation enabled
-  targetLanguage?: string;
   blocks: OcrBlock[];        // paragraphs in reading order
   furigana: OcrFurigana[];   // readings over kanji, not part of text
   vertical: boolean;         // vertical writing detected
@@ -443,7 +417,7 @@ interface CaptureResult extends OcrResult {
 }
 
 interface OcrBlock extends OcrGeometry {
-  text: string; translatedText?: string; recognizedLanguage: string; lines: OcrLine[];
+  text: string; recognizedLanguage: string; lines: OcrLine[];
   segments: OcrSegment[];    // text split into pieces; pieces with furigana have a reading
   region?: number;           // index in result.regions
 }
@@ -471,12 +445,12 @@ interface Point { x: number; y: number }
 
 ## Android details
 
-- Added to your manifest automatically: `CAMERA`, `INTERNET` and `ACCESS_NETWORK_STATE` (translation and
-  handwriting model download), and `android.hardware.camera.any` as not required, so devices without camera can still install.
+- Added to your manifest automatically: `CAMERA`, `INTERNET` and `ACCESS_NETWORK_STATE` (handwriting
+  model download), and `android.hardware.camera.any` as not required, so devices without camera can still install.
 - The Japanese model adds a few MB per CPU architecture to the app.
 - Release builds with R8/minify need no extra rules.
 - Library versions can be overridden in your app's `android/variables.gradle`: `cameraxVersion`,
-  `mlkitTextRecognitionJapaneseVersion`, `mlkitTranslateVersion`, `mlkitDigitalInkVersion`.
+  `mlkitTextRecognitionJapaneseVersion`, `mlkitDigitalInkVersion`.
 
 ## Web engine details
 

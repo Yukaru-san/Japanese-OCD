@@ -72,26 +72,15 @@ export function arrangeLines(lines: PaddleLine[], regions: Rect[] | null): Arran
   return { lines: kept, words, layout: arrange(input, boxes) };
 }
 
-/** Text of every paragraph (result block) in reading order, for translation. */
-export function paragraphTexts(arranged: Arranged): string[] {
-  return arranged.layout.paragraphs.map((p) => p.text);
-}
-
-/**
- * @param translations one entry per block, or null when translation is off
- */
 export function toResult(
   arranged: Arranged,
   imageWidth: number,
   imageHeight: number,
-  translations: string[] | null,
-  targetLanguage: string | null,
   view: ViewMapper | null,
 ): OcrResult {
   const { layout } = arranged;
   const blocks: OcrBlock[] = [];
   const allText: string[] = [];
-  const allTranslated: string[] = [];
 
   layout.paragraphs.forEach((paragraph, i) => {
     let box: Rect | null = null;
@@ -109,10 +98,6 @@ export function toResult(
       s.reading != null ? { text: s.text, reading: s.reading } : { text: s.text },
     );
     block.text = paragraph.text;
-    if (translations != null && i < translations.length) {
-      block.translatedText = translations[i];
-      allTranslated.push(translations[i]);
-    }
     block.lines = lines;
     blocks.push(block);
     allText.push(paragraph.text);
@@ -132,10 +117,6 @@ export function toResult(
   });
 
   const result = { text: allText.join('\n') } as OcrResult;
-  if (translations != null) {
-    result.translatedText = allTranslated.join('\n');
-    if (targetLanguage != null) result.targetLanguage = targetLanguage;
-  }
   result.blocks = blocks;
   result.furigana = furigana;
   result.vertical = layout.vertical;

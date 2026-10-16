@@ -26,10 +26,6 @@ export type JapaneseOcrErrorCode =
   | 'INVALID_ARGUMENT'
   /** The image could not be loaded or ML Kit failed to recognize it. */
   | 'RECOGNITION_FAILED'
-  /** The translation model for the target language is not downloaded. Call `prepareTranslation()`. */
-  | 'TRANSLATION_NOT_READY'
-  /** Translating the recognized text failed. */
-  | 'TRANSLATION_FAILED'
   /** The user closed the photo picker without choosing an image. */
   | 'CANCELLED'
   /** The handwriting model is not on the device and could not be downloaded (e.g. offline). */
@@ -71,8 +67,6 @@ export interface DeviceSupportResult {
   supported: boolean;
   /** `true` when live camera recognition is available (device has a camera). */
   liveCamera: boolean;
-  /** `true` when on-device translation is available. */
-  translation: boolean;
   /** `true` when handwriting recognition (`recognizeHandwriting()`) is available. */
   handwriting: boolean;
   /** Why the device is not (fully) supported. */
@@ -172,8 +166,6 @@ export interface OcrSegment {
 /** A paragraph: consecutive lines of the same text size, in reading order. */
 export interface OcrBlock extends OcrGeometry {
   text: string;
-  /** Translation of this block. Only set when translation is enabled. */
-  translatedText?: string;
   recognizedLanguage: string;
   lines: OcrLine[];
   /** `text` split into pieces with and without furigana. */
@@ -188,10 +180,6 @@ export interface OcrResult {
    * break; the lines within a paragraph are joined (Latin words with a space).
    */
   text: string;
-  /** Translation of all blocks, separated by a line break. Only set when translation is enabled. */
-  translatedText?: string;
-  /** Target language of `translatedText`. */
-  targetLanguage?: string;
   /** Paragraphs in reading order. */
   blocks: OcrBlock[];
   /** Furigana found in the image, in reading order. */
@@ -219,17 +207,6 @@ export interface CaptureResult extends OcrResult {
   imagePath?: string;
 }
 
-export interface TranslationOptions {
-  /** Turns translation of the recognized Japanese text on or off. */
-  enabled: boolean;
-  /**
-   * BCP-47 code of the target language, e.g. `en` or `de`.
-   *
-   * @default 'en'
-   */
-  targetLanguage?: string;
-}
-
 export interface LiveRecognitionOptions {
   /**
    * Which camera to use.
@@ -243,11 +220,6 @@ export interface LiveRecognitionOptions {
    * @default 500
    */
   intervalMs?: number;
-  /**
-   * Translate the recognized text of every frame.
-   * The model must be downloaded with `prepareTranslation()` first.
-   */
-  translation?: TranslationOptions;
 }
 
 export interface CaptureOptions {
@@ -264,8 +236,6 @@ export interface RecognizeImageOptions {
   path?: string;
   /** Base64 image data, with or without `data:` prefix. */
   base64?: string;
-  /** Translate the recognized text. */
-  translation?: TranslationOptions;
   /**
    * Show the image full-screen first, so the user can rotate it and draw frames around the text
    * they want. Only text inside the frames is returned, together with its furigana, even when
@@ -292,49 +262,14 @@ export interface GalleryResult extends OcrResult {
   imagePath: string;
 }
 
-export interface PrepareTranslationOptions {
-  /**
-   * BCP-47 code of the target language.
-   *
-   * @default 'en'
-   */
-  targetLanguage?: string;
-  /**
-   * Only download the model over Wi-Fi.
-   *
-   * @default false
-   */
-  requireWifi?: boolean;
-}
-
-export interface TranslateTextOptions {
-  text: string;
-  /**
-   * BCP-47 code of the target language.
-   *
-   * @default 'en'
-   */
-  targetLanguage?: string;
-}
-
 export interface LiveState {
   running: boolean;
   /** `true` while the preview shows a frame frozen by `captureFrame()`. */
   frozen: boolean;
-  translation: TranslationOptions;
 }
 
 /** Payload of the `liveRecognitionError` event. Same shape as a thrown `JapaneseOcrError`. */
 export type LiveRecognitionErrorEvent = JapaneseOcrError;
-
-export interface TranslationReadyOptions {
-  /**
-   * BCP-47 code of the target language.
-   *
-   * @default 'en'
-   */
-  targetLanguage?: string;
-}
 
 export interface JapaneseOcrPlugin {
   /**
@@ -385,11 +320,6 @@ export interface JapaneseOcrPlugin {
   setTorch(options: { enabled: boolean }): Promise<void>;
 
   /**
-   * Turns translation of live results on or off, or changes the target language.
-   */
-  setTranslation(options: TranslationOptions): Promise<void>;
-
-  /**
    * Recognizes Japanese text in an existing image.
    */
   recognizeImage(options: RecognizeImageOptions): Promise<OcrResult>;
@@ -401,21 +331,6 @@ export interface JapaneseOcrPlugin {
    * screen is closed.
    */
   recognizeFromGallery(options?: GalleryOptions): Promise<GalleryResult>;
-
-  /**
-   * Downloads the Japanese → target language model, if not on the device yet.
-   */
-  prepareTranslation(options?: PrepareTranslationOptions): Promise<void>;
-
-  /**
-   * Checks whether the Japanese → target language model is downloaded. Never throws.
-   */
-  isTranslationReady(options?: TranslationReadyOptions): Promise<{ ready: boolean }>;
-
-  /**
-   * Translates Japanese text on the device.
-   */
-  translateText(options: TranslateTextOptions): Promise<{ text: string; targetLanguage: string }>;
 
   /**
    * Recognizes handwritten Japanese from strokes and returns up to 5 candidates with probabilities.
@@ -442,7 +357,7 @@ export interface JapaneseOcrPlugin {
   addListener(eventName: 'textRecognized', listenerFunc: (result: OcrResult) => void): Promise<PluginListenerHandle>;
 
   /**
-   * Fired when recognizing or translating a live frame fails.
+   * Fired when recognizing a live frame fails.
    */
   addListener(
     eventName: 'liveRecognitionError',

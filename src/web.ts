@@ -15,17 +15,13 @@ import type {
   OcrReadyResult,
   OcrResult,
   PermissionStatus,
-  PrepareTranslationOptions,
   Rect,
   RecognizeHandwritingOptions,
   RecognizeImageOptions,
-  TranslateTextOptions,
-  TranslationOptions,
-  TranslationReadyOptions,
 } from './definitions';
 import type { LiveCamera } from './web/live';
 import type { PaddleEngine } from './web/paddle';
-import type { Arranged, ViewMapper } from './web/result';
+import type { ViewMapper } from './web/result';
 
 /** The methods every engine implements; `setEngine`/`getEngine` belong to the switching wrapper. */
 export type JapaneseOcrEngine = Omit<JapaneseOcrPlugin, 'setEngine' | 'getEngine'>;
@@ -54,15 +50,14 @@ const STILL_MAX_SIDE = 1600;
 
 /**
  * Japanese OCR in the browser: PaddleOCR (PP-OCRv6) on ONNX Runtime Web, camera via
- * `getUserMedia`, photo picker via `<input type="file">`, translation via the browser's on-device
- * Translator API where available. Returns exactly the same result structure as the Android engine.
+ * `getUserMedia`, photo picker via `<input type="file">`. Returns exactly the same result structure
+ * as the Android engine.
  */
 export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   private engine: Promise<Engine> | null = null;
   private ready = false;
   private failure: string | null = null;
   private live: LiveCamera | null = null;
-  private liveTranslationTarget: string | null = null;
   private pendingCapture: { reject: (e: unknown) => void } | null = null;
 
   // Support checks
@@ -129,11 +124,10 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     }
     const supported = reason == null;
     const camera = supported && (await JapaneseOcrWeb.hasCamera());
-    const translation = supported && (await import('./web/translation')).isTranslationSupported();
     if (supported && !camera) {
       reason = 'No camera is available to this page, so only recognizeImage() is available.';
     }
-    const result: DeviceSupportResult = { supported, liveCamera: camera, translation, handwriting: supported };
+    const result: DeviceSupportResult = { supported, liveCamera: camera, handwriting: supported };
     if (reason != null) result.reason = reason;
     return result;
   }
@@ -173,7 +167,6 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     const engine = await this.ensureOcr();
     if (!(await JapaneseOcrWeb.hasCamera())) throw fail('UNAVAILABLE', 'The device has no camera.');
     if (this.live) throw fail('ALREADY_RUNNING', 'Live recognition is already running.');
-    const target = await this.liveTarget(options.translation);
 
     const { LiveCamera } = await import('./web/live');
     if (this.live) throw fail('ALREADY_RUNNING', 'Live recognition is already running.');
@@ -182,7 +175,6 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
       this.onFrame(engine, live, frame, view),
     );
     this.live = live;
-    this.liveTranslationTarget = target;
     try {
       await live.start();
     } catch (e) {
@@ -195,18 +187,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     }
   }
 
-  /** Validates live translation options: the target language, or null when off. */
-  private async liveTarget(options: TranslationOptions | undefined): Promise<string | null> {
-    if (!options?.enabled) return null;
-    const translation = await import('./web/translation');
-    const target = translation.resolveTarget(options.targetLanguage);
-    if (!target) throw fail('INVALID_ARGUMENT', 'Unsupported targetLanguage.');
-    await this.ensureTranslation(target);
-    return target;
-  }
-
   private async onFrame(engine: Engine, live: LiveCamera, frame: HTMLCanvasElement, view: ViewMapper): Promise<void> {
-    const target = this.liveTranslationTarget;
     let result: OcrResult;
     try {
       result = await this.recognizeCanvas(engine, frame, null, view, LIVE_MAX_SIDE);
@@ -215,29 +196,6 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
       return;
     }
     if (this.live !== live || live.frozen) return;
-    if (target != null) {
-      let translations: string[] = [];
-      try {
-        if (result.blocks.length) {
-          const translation = await import('./web/translation');
-          translations = await translation.translateAll(
-            target,
-            result.blocks.map((b) => b.text),
-          );
-        }
-      } catch (e) {
-        // Still deliver the Japanese text, and report why the translation is missing.
-        if (this.live !== live || live.frozen) return;
-        this.notifyListeners('textRecognized', result);
-        this.liveError('TRANSLATION_FAILED', messageOf(e, 'Translation failed'));
-        return;
-      }
-      result = await this.recognizeCanvas(engine, frame, null, view, LIVE_MAX_SIDE, {
-        translations,
-        target,
-        lines: result,
-      });
-    }
     if (this.live !== live || live.frozen) return;
     this.notifyListeners('textRecognized', result);
   }
@@ -265,7 +223,6 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     const live = this.live;
     if (!live?.running) throw fail('NOT_RUNNING', 'Live recognition is not running.');
     if (this.pendingCapture || live.capturing) throw fail('ALREADY_RUNNING', 'A capture is already in progress.');
-    const target = this.liveTranslationTarget;
     const engine = await this.ensureOcr();
 
     return new Promise<CaptureResult>((resolve, reject) => {
@@ -299,14 +256,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
           }
         }
         try {
-          const result: CaptureResult = await this.recognizeTranslated(
-            engine,
-            frame,
-            target,
-            null,
-            live.viewMapper(),
-            STILL_MAX_SIDE,
-          );
+          const result: CaptureResult = await this.recognize(engine, frame, null, live.viewMapper(), STILL_MAX_SIDE);
           if (imagePath) result.imagePath = imagePath;
           finish(result);
         } catch (e) {
@@ -322,10 +272,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   }
 
   async getLiveState(): Promise<LiveState> {
-    const target = this.liveTranslationTarget;
-    const translation: TranslationOptions = { enabled: target != null };
-    if (target != null) translation.targetLanguage = target;
-    return { running: !!this.live?.running, frozen: !!this.live?.frozen, translation };
+    return { running: !!this.live?.running, frozen: !!this.live?.frozen };
   }
 
   async setTorch(options: { enabled: boolean }): Promise<void> {
@@ -339,20 +286,10 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     }
   }
 
-  async setTranslation(options: TranslationOptions): Promise<void> {
-    if (typeof options?.enabled !== 'boolean') throw fail('INVALID_ARGUMENT', 'enabled is required.');
-    if (!options.enabled) {
-      this.liveTranslationTarget = null;
-      return;
-    }
-    this.liveTranslationTarget = await this.liveTarget(options);
-  }
-
   // Still images
 
   async recognizeImage(options: RecognizeImageOptions): Promise<OcrResult> {
     await this.ensureOcr();
-    const target = await this.stillTarget(options?.translation);
     const regions = regionsOf(options?.regions);
     const image = await import('./web/image');
     let blob: Blob;
@@ -371,38 +308,23 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     } else {
       throw fail('INVALID_ARGUMENT', 'Either path or base64 is required.');
     }
-    return this.recognizeStill(blob, target, regions, !!options.selectRegion, options.path ?? null);
+    return this.recognizeStill(blob, regions, !!options.selectRegion, options.path ?? null);
   }
 
   async recognizeFromGallery(options: GalleryOptions = {}): Promise<GalleryResult> {
     // Open the picker first: browsers only allow it shortly after the user's tap.
     const reason = JapaneseOcrWeb.basicSupport();
     if (reason) throw fail('UNAVAILABLE', reason);
-    const translation = await import('./web/translation');
-    if (options.translation?.enabled && !translation.resolveTarget(options.translation.targetLanguage)) {
-      throw fail('INVALID_ARGUMENT', 'Unsupported targetLanguage.');
-    }
     const regions = regionsOf(options.regions);
     const file = await pickImage();
     if (!file) throw fail('CANCELLED', 'No image was selected.');
     await this.ensureOcr();
-    const target = await this.stillTarget(options.translation);
     const path = URL.createObjectURL(file);
-    return (await this.recognizeStill(file, target, regions, !!options.selectRegion, path)) as GalleryResult;
-  }
-
-  /** Validates still-image translation options: the target language, or null when off. */
-  private async stillTarget(options: TranslationOptions | undefined): Promise<string | null> {
-    if (!options?.enabled) return null;
-    const translation = await import('./web/translation');
-    const target = translation.resolveTarget(options.targetLanguage);
-    if (!target) throw fail('INVALID_ARGUMENT', 'Unsupported targetLanguage.');
-    return target;
+    return (await this.recognizeStill(file, regions, !!options.selectRegion, path)) as GalleryResult;
   }
 
   private async recognizeStill(
     blob: Blob,
-    target: string | null,
     regions: Rect[] | null,
     select: boolean,
     imagePath: string | null,
@@ -432,10 +354,9 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
         }
       }
     }
-    const result: OcrResult & { imagePath?: string } = await this.recognizeTranslated(
+    const result: OcrResult & { imagePath?: string } = await this.recognize(
       engine,
       canvas,
-      target,
       regions,
       null,
       STILL_MAX_SIDE,
@@ -447,38 +368,20 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     return result;
   }
 
-  /** Recognizes and, with a target language, translates. Failures carry an error code. */
-  private async recognizeTranslated(
+  /** Recognizes a still image. Failures carry an error code. */
+  private async recognize(
     engine: Engine,
     canvas: HTMLCanvasElement,
-    target: string | null,
     regions: Rect[] | null,
     view: ViewMapper | null,
     maxSide: number,
   ): Promise<OcrResult> {
-    let lines: OcrResult;
     try {
-      lines = await this.recognizeCanvas(engine, canvas, regions, view, maxSide);
+      return await this.recognizeCanvas(engine, canvas, regions, view, maxSide);
     } catch (e) {
       throw fail('RECOGNITION_FAILED', messageOf(e, 'Recognition failed'));
     }
-    if (target == null) return lines;
-    await this.ensureTranslation(target);
-    let translations: string[];
-    try {
-      const translation = await import('./web/translation');
-      translations = await translation.translateAll(
-        target,
-        lines.blocks.map((b) => b.text),
-      );
-    } catch (e) {
-      throw fail('TRANSLATION_FAILED', messageOf(e, 'Translation failed'));
-    }
-    return this.recognizeCanvas(engine, canvas, regions, view, maxSide, { translations, target, lines });
   }
-
-  /** Last arranged lines per result, so translating doesn't run recognition twice. */
-  private readonly arranged = new WeakMap<OcrResult, Arranged>();
 
   private async recognizeCanvas(
     engine: Engine,
@@ -486,74 +389,11 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     regions: Rect[] | null,
     view: ViewMapper | null,
     maxSide: number,
-    translated?: { translations: string[]; target: string; lines: OcrResult },
   ): Promise<OcrResult> {
     const resultModule = await import('./web/result');
-    let arranged = translated ? this.arranged.get(translated.lines) : undefined;
-    if (!arranged) {
-      const { pixelsOf } = await import('./web/image');
-      const lines = await engine.recognize(pixelsOf(canvas), { maxSide });
-      arranged = resultModule.arrangeLines(lines, regions);
-    }
-    const result = resultModule.toResult(
-      arranged,
-      canvas.width,
-      canvas.height,
-      translated ? translated.translations : null,
-      translated ? translated.target : null,
-      view,
-    );
-    this.arranged.set(result, arranged);
-    return result;
-  }
-
-  // Translation
-
-  private async ensureTranslation(target: string): Promise<void> {
-    const translation = await import('./web/translation');
-    if (!translation.isTranslationSupported()) {
-      throw fail('UNAVAILABLE', 'This browser has no on-device translation (Translator API).');
-    }
-    if (!(await translation.isReady(target))) {
-      throw fail(
-        'TRANSLATION_NOT_READY',
-        `Translation model for '${target}' is not downloaded. Call prepareTranslation() first.`,
-      );
-    }
-  }
-
-  async prepareTranslation(options: PrepareTranslationOptions = {}): Promise<void> {
-    const translation = await import('./web/translation');
-    const target = translation.resolveTarget(options.targetLanguage);
-    if (!target) throw fail('INVALID_ARGUMENT', 'Unsupported targetLanguage.');
-    if (!translation.isTranslationSupported()) {
-      throw fail('UNAVAILABLE', 'This browser has no on-device translation (Translator API).');
-    }
-    try {
-      await translation.download(target);
-    } catch (e) {
-      throw fail('TRANSLATION_NOT_READY', `Downloading the translation model failed: ${messageOf(e, 'unknown error')}`);
-    }
-  }
-
-  async isTranslationReady(options: TranslationReadyOptions = {}): Promise<{ ready: boolean }> {
-    const translation = await import('./web/translation');
-    const target = translation.resolveTarget(options.targetLanguage);
-    if (!target) return { ready: false };
-    return { ready: await translation.isReady(target) };
-  }
-
-  async translateText(options: TranslateTextOptions): Promise<{ text: string; targetLanguage: string }> {
-    if (typeof options?.text !== 'string') throw fail('INVALID_ARGUMENT', 'text is required.');
-    const translation = await import('./web/translation');
-    const target = translation.resolveTarget(options.targetLanguage);
-    if (!target) throw fail('INVALID_ARGUMENT', 'Unsupported targetLanguage.');
-    await this.ensureTranslation(target);
-    try {
-      return { text: await translation.translate(target, options.text), targetLanguage: target };
-    } catch (e) {
-      throw fail('TRANSLATION_FAILED', messageOf(e, 'Translation failed'));
-    }
+    const { pixelsOf } = await import('./web/image');
+    const lines = await engine.recognize(pixelsOf(canvas), { maxSide });
+    return resultModule.toResult(resultModule.arrangeLines(lines, regions), canvas.width, canvas.height, view);
   }
 
   // Handwriting

@@ -58,15 +58,12 @@ public class JapaneseOcrPlugin extends Plugin {
     private static final String NOT_RUNNING = "NOT_RUNNING";
     private static final String INVALID_ARGUMENT = "INVALID_ARGUMENT";
     private static final String RECOGNITION_FAILED = "RECOGNITION_FAILED";
-    private static final String TRANSLATION_NOT_READY = "TRANSLATION_NOT_READY";
-    private static final String TRANSLATION_FAILED = "TRANSLATION_FAILED";
     private static final String CANCELLED = "CANCELLED";
     private static final String HANDWRITING_NOT_READY = "HANDWRITING_NOT_READY";
 
     private static final int MIN_SDK = 24;
 
     private final OcrEngine ocr = new OcrEngine();
-    private final TranslationEngine translation = new TranslationEngine();
     private final HandwritingEngine handwriting = new HandwritingEngine();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
@@ -75,10 +72,6 @@ public class JapaneseOcrPlugin extends Plugin {
 
     @Nullable
     private PluginCall pendingCapture;
-
-    /** Target language for live translation, null when off. */
-    @Nullable
-    private volatile String liveTranslationTarget;
 
     @Override
     public void load() {
@@ -91,7 +84,6 @@ public class JapaneseOcrPlugin extends Plugin {
     protected void handleOnDestroy() {
         stopLive();
         ocr.close();
-        translation.close();
         handwriting.close();
         worker.shutdown();
     }
@@ -125,7 +117,6 @@ public class JapaneseOcrPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("supported", supported);
         result.put("liveCamera", camera);
-        result.put("translation", supported);
         result.put("handwriting", Build.VERSION.SDK_INT >= MIN_SDK);
         if (reason != null) result.put("reason", reason);
         call.resolve(result);
@@ -165,7 +156,7 @@ public class JapaneseOcrPlugin extends Plugin {
             requestPermissionForAlias(CAMERA, call, "cameraPermissionCallback");
             return;
         }
-        startLiveWithTranslation(call);
+        openCamera(call);
     }
 
     @PermissionCallback
@@ -174,32 +165,7 @@ public class JapaneseOcrPlugin extends Plugin {
             call.reject("Camera permission was denied.", PERMISSION_DENIED);
             return;
         }
-        startLiveWithTranslation(call);
-    }
-
-    private void startLiveWithTranslation(PluginCall call) {
-        JSObject translationOptions = call.getObject("translation");
-        if (translationOptions == null || !translationOptions.getBoolean("enabled", false)) {
-            liveTranslationTarget = null;
-            openCamera(call);
-            return;
-        }
-        String target = TranslationEngine.resolveTarget(translationOptions.getString("targetLanguage"));
-        if (target == null) {
-            call.reject("Unsupported targetLanguage.", INVALID_ARGUMENT);
-            return;
-        }
-        translation.isReady(target).addOnCompleteListener((task) -> {
-            if (!task.isSuccessful() || !Boolean.TRUE.equals(task.getResult())) {
-                call.reject(
-                    "Translation model for '" + target + "' is not downloaded. Call prepareTranslation() first.",
-                    TRANSLATION_NOT_READY
-                );
-                return;
-            }
-            liveTranslationTarget = target;
-            openCamera(call);
-        });
+        openCamera(call);
     }
 
     private void openCamera(PluginCall call) {
@@ -225,36 +191,9 @@ public class JapaneseOcrPlugin extends Plugin {
     private final LiveCameraController.FrameListener frameListener = new LiveCameraController.FrameListener() {
         @Override
         public void onFrame(Text text, int imageWidth, int imageHeight, @Nullable ViewMapper view, Runnable done) {
-            String target = liveTranslationTarget;
             OcrEngine.Arranged arranged = OcrEngine.arrange(text, null);
-            if (target == null || text.getTextBlocks().isEmpty()) {
-                notifyListeners(
-                    "textRecognized",
-                    OcrEngine.toResult(
-                        arranged,
-                        imageWidth,
-                        imageHeight,
-                        target == null ? null : Collections.<String>emptyList(),
-                        target,
-                        view
-                    )
-                );
-                done.run();
-                return;
-            }
-            translation.translateAll(target, arranged.texts()).addOnCompleteListener((task) -> {
-                if (task.isSuccessful()) {
-                    notifyListeners(
-                        "textRecognized",
-                        OcrEngine.toResult(arranged, imageWidth, imageHeight, task.getResult(), target, view)
-                    );
-                } else {
-                    // Still deliver the Japanese text, and report why the translation is missing.
-                    notifyListeners("textRecognized", OcrEngine.toResult(arranged, imageWidth, imageHeight, null, null, view));
-                    onError(TRANSLATION_FAILED, errorMessage(task.getException(), "Translation failed"));
-                }
-                done.run();
-            });
+            notifyListeners("textRecognized", OcrEngine.toResult(arranged, imageWidth, imageHeight, view));
+            done.run();
         }
 
         @Override
@@ -288,7 +227,6 @@ public class JapaneseOcrPlugin extends Plugin {
     @PluginMethod
     public void captureFrame(PluginCall call) {
         boolean saveImage = call.getBoolean("saveImage", false);
-        String target = liveTranslationTarget;
         getActivity().runOnUiThread(() -> {
             LiveCameraController controller = live;
             if (controller == null || !controller.isRunning()) {
@@ -314,7 +252,7 @@ public class JapaneseOcrPlugin extends Plugin {
                             }
                         }
                         String path = imagePath;
-                        recognize(InputImage.fromBitmap(bitmap, 0), target, view, null).addOnCompleteListener((task) -> {
+                        recognize(InputImage.fromBitmap(bitmap, 0), view, null).addOnCompleteListener((task) -> {
                             if (!task.isSuccessful()) {
                                 Exception e = task.getException();
                                 finishCapture(call, null, errorMessage(e, "Recognition failed"), codeOf(e));
@@ -374,14 +312,9 @@ public class JapaneseOcrPlugin extends Plugin {
     @PluginMethod
     public void getLiveState(PluginCall call) {
         LiveCameraController controller = live;
-        String target = liveTranslationTarget;
-        JSObject translationState = new JSObject();
-        translationState.put("enabled", target != null);
-        if (target != null) translationState.put("targetLanguage", target);
         JSObject result = new JSObject();
         result.put("running", controller != null && controller.isRunning());
         result.put("frozen", controller != null && controller.isFrozen());
-        result.put("translation", translationState);
         call.resolve(result);
     }
 
@@ -402,36 +335,6 @@ public class JapaneseOcrPlugin extends Plugin {
                 return;
             }
             live.setTorch(enabled);
-            call.resolve();
-        });
-    }
-
-    @PluginMethod
-    public void setTranslation(PluginCall call) {
-        Boolean enabled = call.getBoolean("enabled");
-        if (enabled == null) {
-            call.reject("enabled is required.", INVALID_ARGUMENT);
-            return;
-        }
-        if (!enabled) {
-            liveTranslationTarget = null;
-            call.resolve();
-            return;
-        }
-        String target = TranslationEngine.resolveTarget(call.getString("targetLanguage"));
-        if (target == null) {
-            call.reject("Unsupported targetLanguage.", INVALID_ARGUMENT);
-            return;
-        }
-        translation.isReady(target).addOnCompleteListener((task) -> {
-            if (!task.isSuccessful() || !Boolean.TRUE.equals(task.getResult())) {
-                call.reject(
-                    "Translation model for '" + target + "' is not downloaded. Call prepareTranslation() first.",
-                    TRANSLATION_NOT_READY
-                );
-                return;
-            }
-            liveTranslationTarget = target;
             call.resolve();
         });
     }
@@ -464,7 +367,6 @@ public class JapaneseOcrPlugin extends Plugin {
     @PluginMethod
     public void recognizeFromGallery(PluginCall call) {
         if (!ensureOcr(call)) return;
-        if (translationTarget(call) == null) return;
         if (regionsOf(call) == INVALID_REGIONS) return;
 
         Intent intent;
@@ -508,8 +410,6 @@ public class JapaneseOcrPlugin extends Plugin {
      * @param imagePath returned as {@code imagePath}, or null
      */
     private void recognizeStill(PluginCall call, ImageSource source, @Nullable Uri uri, @Nullable String imagePath) {
-        String translateTo = translationTarget(call);
-        if (translateTo == null) return;
         List<ReadingOrder.Box> regions = regionsOf(call);
         if (regions == INVALID_REGIONS) return;
         boolean select = Boolean.TRUE.equals(call.getBoolean("selectRegion", false));
@@ -523,7 +423,7 @@ public class JapaneseOcrPlugin extends Plugin {
                     call.reject("Could not load the image: " + e.getMessage(), RECOGNITION_FAILED);
                     return;
                 }
-                resolveRecognition(call, image, translateTo, imagePath, regions, 0);
+                resolveRecognition(call, image, imagePath, regions, 0);
                 return;
             }
 
@@ -555,7 +455,7 @@ public class JapaneseOcrPlugin extends Plugin {
                                         // Keep the original; the coordinates then refer to the rotated image.
                                     }
                                 }
-                                resolveRecognition(call, InputImage.fromBitmap(image, 0), translateTo, path, selected, rotation);
+                                resolveRecognition(call, InputImage.fromBitmap(image, 0), path, selected, rotation);
                             });
                         }
 
@@ -595,30 +495,14 @@ public class JapaneseOcrPlugin extends Plugin {
         return result.isEmpty() ? null : result;
     }
 
-    /**
-     * Reads `translation` from the call: the target language, "" when translation is off, or null
-     * after rejecting the call for an unsupported language.
-     */
-    @Nullable
-    private static String translationTarget(PluginCall call) {
-        JSObject options = call.getObject("translation");
-        if (options == null || !options.getBoolean("enabled", false)) return "";
-        String target = TranslationEngine.resolveTarget(options.getString("targetLanguage"));
-        if (target == null) {
-            call.reject("Unsupported targetLanguage.", INVALID_ARGUMENT);
-        }
-        return target;
-    }
-
     private void resolveRecognition(
         PluginCall call,
         InputImage image,
-        String translateTo,
         @Nullable String imagePath,
         @Nullable List<ReadingOrder.Box> regions,
         int rotation
     ) {
-        recognize(image, translateTo.isEmpty() ? null : translateTo, null, regions).addOnCompleteListener((task) -> {
+        recognize(image, null, regions).addOnCompleteListener((task) -> {
             if (task.isSuccessful()) {
                 JSObject result = task.getResult();
                 if (imagePath != null) result.put("imagePath", imagePath);
@@ -692,13 +576,8 @@ public class JapaneseOcrPlugin extends Plugin {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
     }
 
-    /** Recognizes an image and optionally translates it. Failures carry an error code. */
-    private Task<JSObject> recognize(
-        InputImage image,
-        @Nullable String target,
-        @Nullable ViewMapper view,
-        @Nullable List<ReadingOrder.Box> regions
-    ) {
+    /** Recognizes an image. Failures carry an error code. */
+    private Task<JSObject> recognize(InputImage image, @Nullable ViewMapper view, @Nullable List<ReadingOrder.Box> regions) {
         int width = image.getRotationDegrees() % 180 == 0 ? image.getWidth() : image.getHeight();
         int height = image.getRotationDegrees() % 180 == 0 ? image.getHeight() : image.getWidth();
         return ocr.process(image).<JSObject>continueWithTask((task) -> {
@@ -706,105 +585,7 @@ public class JapaneseOcrPlugin extends Plugin {
                 return Tasks.forException(new CodedException(RECOGNITION_FAILED, errorMessage(task.getException(), "Recognition failed")));
             }
             OcrEngine.Arranged arranged = OcrEngine.arrange(task.getResult(), regions);
-            if (target == null) {
-                return Tasks.forResult(OcrEngine.toResult(arranged, width, height, null, null, view));
-            }
-            return translation.isReady(target).<JSObject>continueWithTask((ready) -> {
-                if (!ready.isSuccessful() || !Boolean.TRUE.equals(ready.getResult())) {
-                    return Tasks.forException(
-                        new CodedException(
-                            TRANSLATION_NOT_READY,
-                            "Translation model for '" + target + "' is not downloaded. Call prepareTranslation() first."
-                        )
-                    );
-                }
-                return translation.translateAll(target, arranged.texts()).<JSObject>continueWithTask((translated) -> {
-                    if (!translated.isSuccessful()) {
-                        return Tasks.forException(
-                            new CodedException(TRANSLATION_FAILED, errorMessage(translated.getException(), "Translation failed"))
-                        );
-                    }
-                    return Tasks.forResult(OcrEngine.toResult(arranged, width, height, translated.getResult(), target, view));
-                });
-            });
-        });
-    }
-
-    // Translation
-
-    @PluginMethod
-    public void prepareTranslation(PluginCall call) {
-        if (Build.VERSION.SDK_INT < MIN_SDK) {
-            call.reject(unsupportedReason(), UNAVAILABLE);
-            return;
-        }
-        String target = TranslationEngine.resolveTarget(call.getString("targetLanguage"));
-        if (target == null) {
-            call.reject("Unsupported targetLanguage.", INVALID_ARGUMENT);
-            return;
-        }
-        translation.download(target, call.getBoolean("requireWifi", false)).addOnCompleteListener((task) -> {
-            if (task.isSuccessful()) {
-                call.resolve();
-            } else {
-                call.reject(
-                    "Downloading the translation model failed: " + errorMessage(task.getException(), "unknown error"),
-                    TRANSLATION_NOT_READY
-                );
-            }
-        });
-    }
-
-    @PluginMethod
-    public void isTranslationReady(PluginCall call) {
-        String target = TranslationEngine.resolveTarget(call.getString("targetLanguage"));
-        if (Build.VERSION.SDK_INT < MIN_SDK || target == null) {
-            JSObject result = new JSObject();
-            result.put("ready", false);
-            call.resolve(result);
-            return;
-        }
-        translation.isReady(target).addOnCompleteListener((task) -> {
-            JSObject result = new JSObject();
-            result.put("ready", task.isSuccessful() && Boolean.TRUE.equals(task.getResult()));
-            call.resolve(result);
-        });
-    }
-
-    @PluginMethod
-    public void translateText(PluginCall call) {
-        if (Build.VERSION.SDK_INT < MIN_SDK) {
-            call.reject(unsupportedReason(), UNAVAILABLE);
-            return;
-        }
-        String text = call.getString("text");
-        if (text == null) {
-            call.reject("text is required.", INVALID_ARGUMENT);
-            return;
-        }
-        String target = TranslationEngine.resolveTarget(call.getString("targetLanguage"));
-        if (target == null) {
-            call.reject("Unsupported targetLanguage.", INVALID_ARGUMENT);
-            return;
-        }
-        translation.isReady(target).addOnCompleteListener((ready) -> {
-            if (!ready.isSuccessful() || !Boolean.TRUE.equals(ready.getResult())) {
-                call.reject(
-                    "Translation model for '" + target + "' is not downloaded. Call prepareTranslation() first.",
-                    TRANSLATION_NOT_READY
-                );
-                return;
-            }
-            translation.translate(target, text).addOnCompleteListener((task) -> {
-                if (!task.isSuccessful()) {
-                    call.reject(errorMessage(task.getException(), "Translation failed"), TRANSLATION_FAILED);
-                    return;
-                }
-                JSObject result = new JSObject();
-                result.put("text", task.getResult());
-                result.put("targetLanguage", target);
-                call.resolve(result);
-            });
+            return Tasks.forResult(OcrEngine.toResult(arranged, width, height, view));
         });
     }
 
