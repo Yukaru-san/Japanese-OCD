@@ -27,6 +27,10 @@ Other scripts: `npm run build` (type check + Vite build to `dist/`), `npm run sy
 A debug APK is built with `cd android && ./gradlew assembleDebug` after `npm run sync`
 (`android/app/build/outputs/apk/debug/app-debug.apk`).
 
+The APK contains native code for `arm64-v8a` only (`abiFilters` in `android/app/build.gradle`), which every
+current phone uses; x86 emulators and old 32-bit phones can't install it. Remove the filter to build for all
+architectures (about 50 MB larger).
+
 The plugin is installed from the `main` branch on GitHub. To try a local checkout of the plugin instead:
 `npm install ../Japanese-OCD` (plugin repo next to this one), then `npm run sync` again.
 
