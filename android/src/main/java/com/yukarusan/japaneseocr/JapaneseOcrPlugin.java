@@ -139,7 +139,10 @@ public class JapaneseOcrPlugin extends Plugin {
 
     @PluginMethod
     public void isOcrReady(PluginCall call) {
-        call.resolve(readyResult(ocr.isReady()));
+        JSObject result = readyResult(ocr.isReady());
+        String reason = unsupportedReason();
+        if (reason != null) result.put("reason", reason);
+        call.resolve(result);
     }
 
     /** Rejects the call and returns false when OCR cannot run. */
@@ -569,7 +572,7 @@ public class JapaneseOcrPlugin extends Plugin {
             call.reject(MIN_SDK_MESSAGE, UNAVAILABLE);
             return;
         }
-        handwriting.download(call.getBoolean("requireWifi", false)).addOnCompleteListener((task) -> {
+        handwriting.download(getContext(), call.getBoolean("requireWifi", false)).addOnCompleteListener((task) -> {
             if (task.isSuccessful()) {
                 call.resolve();
             } else {
@@ -603,7 +606,7 @@ public class JapaneseOcrPlugin extends Plugin {
             return;
         }
         // Downloads the model on first use; no-op once it is on the device.
-        handwriting.download(false).addOnCompleteListener((download) -> {
+        handwriting.download(getContext(), false).addOnCompleteListener((download) -> {
             if (!download.isSuccessful()) {
                 call.reject(
                     "The handwriting model is not on the device and could not be downloaded: " +

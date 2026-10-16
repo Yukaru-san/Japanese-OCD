@@ -1,5 +1,8 @@
 package com.yukarusan.japaneseocr;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
 import androidx.annotation.Nullable;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
@@ -57,13 +60,35 @@ class HandwritingEngine {
         return RemoteModelManager.getInstance().isModelDownloaded(model());
     }
 
-    /** Downloads the model if needed. Concurrent calls share one download. */
-    synchronized Task<Void> download(boolean requireWifi) {
+    /**
+     * Downloads the model if needed. Concurrent calls share one download. Fails at once when the
+     * model is missing and the device is offline: ML Kit would otherwise queue the download until a
+     * network shows up and the call would never finish (e.g. on GrapheneOS with the app's Network
+     * permission turned off).
+     */
+    synchronized Task<Void> download(Context context, boolean requireWifi) {
         if (download != null && !download.isComplete()) return download;
-        DownloadConditions.Builder conditions = new DownloadConditions.Builder();
-        if (requireWifi) conditions.requireWifi();
-        download = RemoteModelManager.getInstance().download(model(), conditions.build());
+        download = isReady().continueWithTask((downloaded) -> {
+            if (downloaded.isSuccessful() && Boolean.TRUE.equals(downloaded.getResult())) return Tasks.forResult(null);
+            if (!isOnline(context)) {
+                return Tasks.forException(
+                    new IllegalStateException(
+                        "no internet connection. The model (about 20 MB) is downloaded once; allow the app network access and try again."
+                    )
+                );
+            }
+            DownloadConditions.Builder conditions = new DownloadConditions.Builder();
+            if (requireWifi) conditions.requireWifi();
+            return RemoteModelManager.getInstance().download(model(), conditions.build());
+        });
         return download;
+    }
+
+    private static boolean isOnline(Context context) {
+        ConnectivityManager connectivity = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivity == null) return true; // can't tell; let ML Kit try
+        NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(connectivity.getActiveNetwork());
+        return capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
     }
 
     private synchronized DigitalInkRecognizer recognizer() {
