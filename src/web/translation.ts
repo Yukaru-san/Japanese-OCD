@@ -40,21 +40,35 @@ export function resolveTarget(tag: string | undefined | null): string | null {
 
 const translators = new Map<string, Promise<BrowserTranslator>>();
 
-export async function isReady(target: string): Promise<boolean> {
+/** Some browsers (e.g. headless Chrome) never answer `availability()`; after this, it counts as unavailable. */
+const AVAILABILITY_TIMEOUT_MS = 5000;
+
+async function availabilityOf(target: string): Promise<Availability> {
   const translator = api();
-  if (!translator) return false;
+  if (!translator) return 'unavailable';
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return (await translator.availability({ sourceLanguage: 'ja', targetLanguage: target })) === 'available';
+    return await Promise.race([
+      translator.availability({ sourceLanguage: 'ja', targetLanguage: target }),
+      new Promise<Availability>(
+        (resolve) => (timer = setTimeout(() => resolve('unavailable'), AVAILABILITY_TIMEOUT_MS)),
+      ),
+    ]);
   } catch {
-    return false;
+    return 'unavailable';
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+export async function isReady(target: string): Promise<boolean> {
+  return (await availabilityOf(target)) === 'available';
 }
 
 /** Downloads the language pack if needed. Browsers may require a user gesture (a tap) for this. */
 export async function download(target: string): Promise<void> {
-  const translator = api();
-  if (!translator) throw new Error('This browser has no on-device translation.');
-  const availability = await translator.availability({ sourceLanguage: 'ja', targetLanguage: target });
+  if (!api()) throw new Error('This browser has no on-device translation.');
+  const availability = await availabilityOf(target);
   if (availability === 'unavailable')
     throw new Error(`Translating Japanese to '${target}' is not supported by this browser.`);
   await get(target);

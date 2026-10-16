@@ -32,7 +32,10 @@ npm run build           # build your web app
 npx cap sync android
 ```
 
-Starting from a plain web app (e.g. Vite, output folder `dist`), set up Capacitor first:
+For a web-only app (browser, no Android), `npm install @capacitor/core@^8 github:Yukaru-san/Japanese-OCD#main` is
+enough; the [web engine](#web-engine) is used automatically.
+
+Starting from a plain web app (e.g. Vite, output folder `dist`) for Android, set up Capacitor first:
 
 ```bash
 npm install @capacitor/core@^8 @capacitor/android@^8
@@ -263,8 +266,10 @@ async function recognize(): Promise<void> {
 
 ```ts
 const result = await JapaneseOcr.recognizeImage({ path: 'file:///…/photo.jpg' }); // or content://…
-const result2 = await JapaneseOcr.recognizeImage({ base64: 'data:image/jpeg;base64,…' });
+const result2 = await JapaneseOcr.recognizeImage({ base64: 'data:image/jpeg;base64,…' }); // prefix optional
 ```
+
+In the browser (web engine), `path` is a URL the page can fetch; see [Web engine](#web-engine).
 
 ## Text order and furigana
 
@@ -336,7 +341,9 @@ The choice is not stored; call `setEngine()` again after the app starts if you w
   model 14.2 MB, WebAssembly runtime 4.9 MB, character list 0.1 MB.
 - These are separate chunks that bundlers (Vite, webpack, Rollup) load **only when the web engine is used**. On
   Android with the native engine they are never loaded, but they are part of the app's web assets.
-- Loading starts with the first call; `isOcrReady()` turns `true` when the models are ready (a few seconds).
+- Loading starts with the first call; `isOcrReady()` turns `true` when the models are ready (a few seconds). The
+  first recognition therefore takes a few seconds longer.
+- Vite warns that these chunks are larger than 500 kB; that is expected (`build.chunkSizeWarningLimit` silences it).
 
 ### How it behaves in the browser
 
@@ -349,7 +356,7 @@ The choice is not stored; call `setEngine()` again after the app starts if you w
 | Gallery | Opens the browser's file picker. `imagePath` is a `blob:` URL. Cancelling throws `CANCELLED` (in browsers that report it; otherwise when the window gets focus back without a file). |
 | `recognizeImage` | `base64`, or `path` as any URL the page can `fetch()` (`https:`, relative, `blob:`, `data:`). `file://` and `content://` paths don't work in the browser. |
 | Selection screen | `selectRegion: true` shows the same rotate/frame screen, as HTML. |
-| Translation | Uses the browser's built-in on-device Translator API (Chrome 138+ on desktop). Without it, translation calls throw `UNAVAILABLE` and `isDeviceSupported().translation` is `false`. `prepareTranslation()` downloads the language pack (the browser may require a tap first); `requireWifi` is ignored. |
+| Translation | Uses the browser's built-in on-device Translator API (Chrome 138+ on desktop). Without it, translation calls throw `UNAVAILABLE` and `isDeviceSupported().translation` is `false`. If the browser does not answer within 5 s (e.g. headless Chrome), the language counts as not ready: `isTranslationReady()` returns `false`, translating throws `TRANSLATION_NOT_READY`. `prepareTranslation()` downloads the language pack (the browser may require a tap first); `requireWifi` is ignored. |
 | Handwriting | Recognized with the PaddleOCR recognizer, limited to Japanese characters, up to 5 candidates with probabilities. Noticeably less accurate than ML Kit's handwriting model, best with neat, upright characters; `preContext` is ignored. `prepareHandwriting()` only loads the OCR models. |
 
 ### Limits
@@ -480,4 +487,5 @@ interface Point { x: number; y: number }
 - Runtime: ONNX Runtime Web 1.30.0 (MIT), WebAssembly backend, copied into the package at build time; your app does
   not install `onnxruntime-web`. The `.wasm` file is embedded in the JavaScript, so no bundler or server
   configuration is needed.
-- `npm run build` turns the models into the JavaScript chunks in `dist/esm/web/assets/`.
+- For contributors: the plugin's own `npm run build` turns the models into the JavaScript chunks in
+  `dist/esm/web/assets/`.
