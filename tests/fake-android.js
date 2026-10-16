@@ -3,7 +3,7 @@
 // (androidBridge.postMessage → Capacitor.fromNative) and returns data in the shape the
 // Java plugin builds in OcrEngine.toResult(). It knows nothing about the app's glossary.
 (() => {
-  const state = { inkModel: false, permission: 'prompt', running: false, frozen: false, translation: null, models: new Set(), clipboard: '', torch: false };
+  const state = { inkModel: false, permission: 'prompt', running: false, frozen: false, clipboard: '', torch: false };
   const listeners = {};
 
   // A camera frame that shows two lines of text. Each line: text, left, top in CSS px of the WebView.
@@ -13,7 +13,6 @@
   ];
   const CHAR = 34; // CSS px per character in the preview
   const SCALE = 3; // image px per CSS px
-  const TRANSLATIONS = { en: ['Hello, world', 'Study Japanese'], de: ['Hallo, Welt', 'Japanisch lernen'] };
 
   const left2 = () => LINES[1][1];
   const rect = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b });
@@ -29,8 +28,7 @@
   };
 
   function frame(withView) {
-    const target = state.translation;
-    const blocks = LINES.map(([text, left, top], i) => {
+    const blocks = LINES.map(([text, left, top]) => {
       const chars = Array.from(text);
       // ML Kit splits Japanese lines into elements at punctuation; one element per chunk here.
       const chunks = text.split(/(?<=、)/);
@@ -55,17 +53,11 @@
         ? [{ text: '日本語', reading: 'にほんご' }, { text: text.slice(3) }]
         : [{ text }];
       const block = { text, recognizedLanguage: 'ja', lines: [line], segments, ...g };
-      if (target) block.translatedText = TRANSLATIONS[target][i];
       return block;
     });
     const furigana = [{ text: 'にほんご', base: '日本語', block: 1, start: 0, end: 3, ...geometry(rect(left2(), 210, left2() + 3 * CHAR, 226)) }];
     if (!withView) furigana.forEach((f) => { delete f.viewBoundingBox; delete f.viewCornerPoints; });
-    const result = { text: blocks.map((b) => b.text).join('\n'), blocks, furigana, vertical: false, imageWidth: 1170, imageHeight: 2532 };
-    if (target) {
-      result.translatedText = blocks.map((b) => b.translatedText).join('\n');
-      result.targetLanguage = target;
-    }
-    return result;
+    return { text: blocks.map((b) => b.text).join('\n'), blocks, furigana, vertical: false, imageWidth: 1170, imageHeight: 2532 };
   }
 
   const reply = (callbackId, pluginId, methodName, data, error, save) =>
@@ -82,7 +74,7 @@
   }
 
   const ocr = {
-    isDeviceSupported: () => ({ supported: true, liveCamera: true, translation: true, handwriting: true }),
+    isDeviceSupported: () => ({ supported: true, liveCamera: true, handwriting: true }),
     isHandwritingReady: () => ({ ready: state.inkModel }),
     prepareHandwriting: () => { state.inkModel = true; },
     recognizeHandwriting: (o) => {
@@ -101,15 +93,9 @@
     isOcrReady: () => ({ ready: true }),
     checkPermissions: () => ({ camera: state.permission }),
     requestPermissions: () => { state.permission = 'granted'; return { camera: 'granted' }; },
-    startLiveRecognition: (o) => {
+    startLiveRecognition: () => {
       if (state.running) throw reject('Live recognition is already running.', 'ALREADY_RUNNING');
       state.permission = 'granted';
-      const t = o.translation;
-      if (t && t.enabled) {
-        const lang = t.targetLanguage || 'en';
-        if (!state.models.has(lang)) throw reject(`Translation model for '${lang}' is not downloaded. Call prepareTranslation() first.`, 'TRANSLATION_NOT_READY');
-        state.translation = lang;
-      } else state.translation = null;
       state.running = true;
       startFrames();
     },
@@ -125,39 +111,18 @@
       if (!state.running) throw reject('Live recognition is not running.', 'NOT_RUNNING');
       state.frozen = false;
     },
-    getLiveState: () => ({ running: state.running, frozen: state.frozen, translation: { enabled: !!state.translation, targetLanguage: state.translation || undefined } }),
+    getLiveState: () => ({ running: state.running, frozen: state.frozen }),
     setTorch: (o) => { if (!state.running) throw reject('Live recognition is not running.', 'NOT_RUNNING'); state.torch = o.enabled; },
-    setTranslation: (o) => {
-      if (!o.enabled) { state.translation = null; return; }
-      const lang = o.targetLanguage || 'en';
-      if (!state.models.has(lang)) throw reject(`Translation model for '${lang}' is not downloaded. Call prepareTranslation() first.`, 'TRANSLATION_NOT_READY');
-      state.translation = lang;
-    },
     recognizeImage: (o) => {
       if (!o.path && !o.base64) throw reject('Either path or base64 is required.', 'INVALID_ARGUMENT');
-      const saved = state.translation;
-      state.translation = o.translation && o.translation.enabled ? (o.translation.targetLanguage || 'en') : null;
-      if (state.translation && !state.models.has(state.translation)) { state.translation = saved; throw reject('Translation model is not downloaded.', 'TRANSLATION_NOT_READY'); }
-      const r = frame(false);
-      state.translation = saved;
-      return r;
+      return frame(false);
     },
     recognizeFromGallery: (o) => {
       state.lastGallery = o;
       if (state.pickerCancels) throw reject('No image was selected.', 'CANCELLED');
-      const saved = state.translation;
-      state.translation = o.translation && o.translation.enabled ? (o.translation.targetLanguage || 'en') : null;
       const r = frame(false);
-      state.translation = saved;
       r.imagePath = 'content://media/picker/0/com.android.providers.media.photopicker/media/1000000033';
       return r;
-    },
-    prepareTranslation: (o) => { state.models.add(o.targetLanguage || 'en'); },
-    isTranslationReady: (o) => ({ ready: state.models.has(o.targetLanguage || 'en') }),
-    translateText: (o) => {
-      const lang = o.targetLanguage || 'en';
-      if (!state.models.has(lang)) throw reject('Translation model is not downloaded.', 'TRANSLATION_NOT_READY');
-      return { text: `[${lang}] ${o.text}`, targetLanguage: lang };
     },
   };
   const clipboard = {

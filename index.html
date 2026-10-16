@@ -34,27 +34,10 @@
           <dd id="permission">…</dd>
           <dt>Handschriftmodell</dt>
           <dd id="handwriting-ready">…</dd>
-          <dt>Übersetzungsmodell</dt>
-          <dd id="translation-ready">…</dd>
         </dl>
         <div class="row">
           <button id="refresh">Aktualisieren</button>
           <button id="request-permission">Berechtigung anfragen</button>
-        </div>
-      </section>
-
-      <section>
-        <h2>Übersetzung</h2>
-        <label class="row">
-          <input type="checkbox" id="translate" />
-          Übersetzen nach
-          <select id="language">
-            <option value="de">Deutsch</option>
-            <option value="en">Englisch</option>
-          </select>
-        </label>
-        <div class="row">
-          <button id="prepare-translation">Modell laden</button>
         </div>
       </section>
 
@@ -89,15 +72,12 @@
       <section>
         <h2>Ergebnis</h2>
         <textarea id="result" rows="6" placeholder="Erkannter Text"></textarea>
-        <textarea id="result-translation" rows="4" placeholder="Übersetzung"></textarea>
         <img id="captured-image" alt="" hidden />
         <div id="result-ruby" lang="ja"></div>
         <div id="result-words"></div>
         <div id="result-furigana"></div>
         <div class="row">
           <button id="copy">Text kopieren</button>
-          <button id="copy-translation">Übersetzung kopieren</button>
-          <button id="translate-result">Text übersetzen</button>
         </div>
         <details>
           <summary>JSON</summary>
@@ -117,12 +97,10 @@
     <div id="live-overlay" hidden>
       <div id="live-words"></div>
       <div id="live-text"></div>
-      <div id="live-translation"></div>
       <div class="row">
         <button id="capture" class="primary">Festhalten</button>
         <button id="resume" hidden>Weiter</button>
         <button id="torch">Licht</button>
-        <button id="live-translate">Übersetzung an</button>
         <button id="stop">Stopp</button>
       </div>
     </div>
