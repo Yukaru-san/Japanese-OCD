@@ -189,4 +189,84 @@ public class ReadingOrderTest {
         assertTrue(ReadingOrder.hasKanji("ポニーテールが禁止"));
         assertFalse(ReadingOrder.hasKanji("にほん がっこう"));
     }
+
+    /** Slightly skewed lines: "same row" does not chain, which used to break List.sort's contract. */
+    @Test
+    public void sortsManySkewedLinesWithoutBreakingTheSortContract() {
+        List<ReadingOrder.Line> lines = new ArrayList<>();
+        // 12 rows of 4 pieces each; within a row every piece sits 4 px lower than the one left of it.
+        for (int r = 11; r >= 0; r--) {
+            for (int c = 3; c >= 0; c--) {
+                int top = 100 + r * 60 + c * 4;
+                lines.add(line("行" + r + "の" + c, c * 120, top, c * 120 + 100, top + 40));
+            }
+        }
+        ReadingOrder.Layout layout = ReadingOrder.arrange(lines);
+
+        StringBuilder text = new StringBuilder();
+        for (ReadingOrder.Paragraph p : layout.paragraphs) text.append(p.text);
+        StringBuilder expected = new StringBuilder();
+        for (int r = 0; r < 12; r++) for (int c = 0; c < 4; c++) expected.append("行").append(r).append("の").append(c);
+        assertEquals(expected.toString(), text.toString());
+    }
+
+    /** With this input the old pairwise comparator made List.sort throw "Comparison method violates its general contract". */
+    @Test
+    public void sortsAScatteredPageWithoutThrowing() {
+        java.util.Random random = new java.util.Random(932);
+        List<ReadingOrder.Line> lines = new ArrayList<>();
+        for (int i = 0; i < 400; i++) {
+            int top = random.nextInt(2000);
+            int left = random.nextInt(800);
+            lines.add(line("行", left, top, left + 100, top + 40));
+        }
+        ReadingOrder.Layout layout = ReadingOrder.arrange(lines);
+        int count = 0;
+        for (ReadingOrder.Paragraph p : layout.paragraphs) count += p.parts.size();
+        assertEquals(400, count);
+    }
+
+    @Test
+    public void keepsSmallKanaWithoutKanjiBelowAsText() {
+        List<ReadingOrder.Line> lines = Arrays.asList(
+            line("本文の一行目です", 0, 100, 400, 140),
+            line("本文の二行目です", 0, 160, 400, 200),
+            line("本文の三行目です", 0, 220, 400, 260),
+            line("ログイン", 0, 400, 80, 420) // small button text, nothing printed under it
+        );
+        ReadingOrder.Layout layout = ReadingOrder.arrange(lines);
+
+        assertTrue(layout.furigana.isEmpty());
+        assertTrue(layout.ruby.isEmpty());
+        assertEquals(Arrays.asList("本文の一行目です本文の二行目です本文の三行目です", "ログイン"), paragraphs(lines, layout));
+    }
+
+    /** ML Kit may put a space between words; base must still be text.substring(start, end). */
+    @Test
+    public void baseMatchesTheTextAlsoWithASpace() {
+        List<ReadingOrder.Line> lines = Arrays.asList(glyphs("にほんご", 0, 70, 35, 20), glyphs("日本 語を勉強する", 0, 100, 40, 40));
+        ReadingOrder.Layout layout = ReadingOrder.arrange(lines);
+
+        assertEquals(Arrays.asList("日本 語=にほんご@日本 語"), ruby(layout));
+        assertEquals("日本 語(にほんご)を勉強する", rubyText(layout, 0));
+    }
+
+    @Test
+    public void readingsClaimingTheSameKanjiDoNotBothKeepAPosition() {
+        // Two readings over 学; segments keeps the first, so furigana must not place the second.
+        List<ReadingOrder.Line> lines = Arrays.asList(
+            glyphs("がく", 0, 70, 20, 20),
+            glyphs("まな", 30, 70, 20, 20),
+            glyphs("学ぶのが好き", 0, 100, 40, 40)
+        );
+        ReadingOrder.Layout layout = ReadingOrder.arrange(lines);
+
+        int placed = 0;
+        for (ReadingOrder.Ruby r : layout.ruby) if (r.start >= 0) placed++;
+        int withReading = 0;
+        for (ReadingOrder.Segment segment : ReadingOrder.segments(layout.paragraphs.get(0).text, layout.ruby, 0)) {
+            if (segment.reading != null) withReading++;
+        }
+        assertEquals(withReading, placed);
+    }
 }
