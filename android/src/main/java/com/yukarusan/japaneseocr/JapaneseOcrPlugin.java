@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.json.JSONException;
@@ -85,9 +86,10 @@ public class JapaneseOcrPlugin extends Plugin {
 
     @Override
     public void load() {
-        // Start loading the recognizer with the app, so the first call doesn't wait for it.
+        // Check the Play Services model with the app and start its download if needed, so the
+        // first call doesn't wait for it.
         if (isSdkSupported()) {
-            ocr.initialize();
+            ocr.initialize(getContext());
         }
     }
 
@@ -110,7 +112,7 @@ public class JapaneseOcrPlugin extends Plugin {
         if (!isSdkSupported()) {
             return MIN_SDK_MESSAGE;
         }
-        if (!ocr.isUsable()) {
+        if (!ocr.isSupported()) {
             String failure = ocr.getFailure();
             return failure != null ? failure : "The Japanese text recognizer is not available.";
         }
@@ -133,20 +135,59 @@ public class JapaneseOcrPlugin extends Plugin {
         result.put("supported", supported);
         result.put("liveCamera", camera);
         result.put("handwriting", isSdkSupported());
+        result.put("playServices", ocr.getModel() != OcrEngine.Model.UNAVAILABLE);
         if (reason != null) result.put("reason", reason);
         call.resolve(result);
     }
 
     @PluginMethod
     public void isOcrReady(PluginCall call) {
-        call.resolve(readyResult(ocr.isReady()));
+        JSObject result = readyResult(ocr.isReady());
+        OcrEngine.Model model = isSdkSupported() ? ocr.getModel() : OcrEngine.Model.UNAVAILABLE;
+        result.put("model", model.name().toLowerCase(Locale.ROOT));
+        if (model == OcrEngine.Model.DOWNLOADING && ocr.getProgress() >= 0) {
+            result.put("progress", ocr.getProgress());
+        }
+        String message = ocr.getFailure() != null ? ocr.getFailure() : ocr.getDownloadFailure();
+        if (!isSdkSupported()) message = MIN_SDK_MESSAGE;
+        if (message != null && model != OcrEngine.Model.INSTALLED) result.put("message", message);
+        call.resolve(result);
     }
 
-    /** Rejects the call and returns false when OCR cannot run. */
+    @PluginMethod
+    public void prepareOcr(PluginCall call) {
+        String reason = unsupportedReason();
+        if (reason != null) {
+            call.reject(reason, UNAVAILABLE);
+            return;
+        }
+        ocr.download().addOnCompleteListener((task) -> {
+            if (task.isSuccessful()) {
+                call.resolve();
+            } else {
+                call.reject(errorMessage(task.getException(), "Downloading the Japanese OCR model failed."), NOT_READY);
+            }
+        });
+    }
+
+    /** Rejects the call and returns false when OCR cannot run (yet). */
     private boolean ensureOcr(PluginCall call) {
         String reason = unsupportedReason();
         if (reason != null) {
-            call.reject(reason, isSdkSupported() ? NOT_READY : UNAVAILABLE);
+            boolean permanent = !isSdkSupported() || ocr.getModel() == OcrEngine.Model.UNAVAILABLE;
+            call.reject(reason, permanent ? UNAVAILABLE : NOT_READY);
+            return false;
+        }
+        if (!ocr.isUsable()) {
+            String message =
+                ocr.getModel() == OcrEngine.Model.DOWNLOADING
+                    ? "The Japanese OCR model is still being downloaded by Google Play Services."
+                    : "The Japanese OCR model is not on this device yet; call prepareOcr() to download it.";
+            String failed = ocr.getDownloadFailure();
+            call.reject(
+                failed != null && ocr.getModel() == OcrEngine.Model.MISSING ? failed + " Call prepareOcr() to retry." : message,
+                NOT_READY
+            );
             return false;
         }
         return true;

@@ -1,5 +1,6 @@
 package com.yukarusan.japaneseocr;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Point;
@@ -7,7 +8,16 @@ import android.graphics.Rect;
 import androidx.annotation.Nullable;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.common.moduleinstall.InstallStatusListener;
+import com.google.android.gms.common.moduleinstall.ModuleInstall;
+import com.google.android.gms.common.moduleinstall.ModuleInstallClient;
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest;
+import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate;
 import com.google.android.gms.tasks.Task;
+import com.google.android.gms.tasks.TaskCompletionSource;
+import com.google.android.gms.tasks.Tasks;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
 import com.google.mlkit.vision.text.TextRecognition;
@@ -19,32 +29,171 @@ import java.util.List;
 
 /**
  * Wraps the ML Kit Japanese text recognizer and converts its results to JS objects.
+ *
+ * <p>The model is not part of the app: it comes from Google Play Services, which downloads it once
+ * per device (shared by all apps that use it). {@link #initialize} checks whether it is there and
+ * starts the download if not; recognition is only possible once {@link #getModel} is
+ * {@link Model#INSTALLED}.
  */
 class OcrEngine {
+
+    /** Where the Play Services model stands. Values are sent to JS in lower case. */
+    enum Model {
+        /** Not checked yet. */
+        CHECKING,
+        /** Not on the device and no download running; {@link #download} starts one. */
+        MISSING,
+        DOWNLOADING,
+        INSTALLED,
+        /** Google Play Services is missing or too old, so the model can never be loaded. */
+        UNAVAILABLE
+    }
 
     @Nullable
     private TextRecognizer recognizer;
 
+    @Nullable
+    private ModuleInstallClient modules;
+
+    private volatile Model model = Model.CHECKING;
+
+    /** Download progress 0..1 while {@link Model#DOWNLOADING}, else -1. */
+    private volatile double progress = -1;
+
     private volatile boolean ready = false;
 
+    /** Why the recognizer can never run (no Play Services, recognizer could not be created). */
     @Nullable
     private volatile String failure;
 
+    /** Why the last download failed; cleared when a new one starts. */
+    @Nullable
+    private volatile String downloadFailure;
+
+    /** The running download, so concurrent {@link #download} calls share it. */
+    @Nullable
+    private Task<Void> pendingDownload;
+
     /**
-     * Creates the recognizer and runs a tiny warm-up image through it, so the model is loaded
-     * before the first real frame.
+     * Checks Google Play Services, creates the recognizer and either warms it up (model already
+     * there) or starts downloading the model.
      */
-    void initialize() {
+    void initialize(Context context) {
+        int services = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context);
+        if (services != ConnectionResult.SUCCESS) {
+            model = Model.UNAVAILABLE;
+            failure =
+                "Google Play Services is not available on this device (" +
+                GoogleApiAvailability.getInstance().getErrorString(services) +
+                "), so the Japanese OCR model cannot be loaded.";
+            return;
+        }
         try {
             recognizer = TextRecognition.getClient(new JapaneseTextRecognizerOptions.Builder().build());
         } catch (Exception e) {
             failure = "Could not create the Japanese text recognizer: " + e.getMessage();
             return;
         }
+        modules = ModuleInstall.getClient(context);
+        modules
+            .areModulesAvailable(recognizer)
+            .addOnSuccessListener((response) -> {
+                if (response.areModulesAvailable()) {
+                    installed();
+                } else {
+                    model = Model.MISSING;
+                    download();
+                }
+            })
+            .addOnFailureListener((e) -> {
+                model = Model.MISSING;
+                downloadFailure = "Could not check the Japanese OCR model: " + e.getMessage();
+            });
+    }
 
+    /**
+     * Asks Play Services to download the model. Resolves when it is installed and the recognizer is
+     * warmed up; fails when Play Services is missing or the download fails.
+     */
+    synchronized Task<Void> download() {
+        if (recognizer == null || modules == null) {
+            return Tasks.forException(new IllegalStateException(failure != null ? failure : "The recognizer is not initialized."));
+        }
+        if (model == Model.INSTALLED) {
+            return Tasks.forResult(null);
+        }
+        if (pendingDownload != null) {
+            return pendingDownload;
+        }
+        TaskCompletionSource<Void> done = new TaskCompletionSource<>();
+        pendingDownload = done.getTask();
+        model = Model.DOWNLOADING;
+        progress = 0;
+        downloadFailure = null;
+
+        ModuleInstallClient client = modules;
+        InstallStatusListener listener = new InstallStatusListener() {
+            @Override
+            public void onInstallStatusUpdated(ModuleInstallStatusUpdate update) {
+                ModuleInstallStatusUpdate.ProgressInfo info = update.getProgressInfo();
+                if (info != null && info.getTotalBytesToDownload() > 0) {
+                    progress = (double) info.getBytesDownloaded() / info.getTotalBytesToDownload();
+                }
+                int state = update.getInstallState();
+                if (state == ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED) {
+                    client.unregisterListener(this);
+                    installed();
+                    finishDownload(done, null);
+                } else if (
+                    state == ModuleInstallStatusUpdate.InstallState.STATE_FAILED ||
+                    state == ModuleInstallStatusUpdate.InstallState.STATE_CANCELED
+                ) {
+                    client.unregisterListener(this);
+                    downloadFailed(
+                        done,
+                        "Google Play Services could not download the Japanese OCR model (error " + update.getErrorCode() + ")."
+                    );
+                }
+            }
+        };
+        ModuleInstallRequest request = ModuleInstallRequest.newBuilder().addApi(recognizer).setListener(listener).build();
+        client
+            .installModules(request)
+            .addOnSuccessListener((response) -> {
+                if (response.areModulesAlreadyInstalled()) {
+                    client.unregisterListener(listener);
+                    installed();
+                    finishDownload(done, null);
+                }
+            })
+            .addOnFailureListener((e) -> {
+                client.unregisterListener(listener);
+                downloadFailed(done, "Google Play Services could not download the Japanese OCR model: " + e.getMessage());
+            });
+        return pendingDownload;
+    }
+
+    private void downloadFailed(TaskCompletionSource<Void> done, String message) {
+        model = Model.MISSING;
+        downloadFailure = message;
+        finishDownload(done, new IllegalStateException(message));
+    }
+
+    private synchronized void finishDownload(TaskCompletionSource<Void> done, @Nullable Exception error) {
+        pendingDownload = null;
+        progress = -1;
+        if (error == null) done.trySetResult(null);
+        else done.trySetException(error);
+    }
+
+    /** The model is on the device: run a tiny warm-up image so it is loaded before the first frame. */
+    private void installed() {
+        model = Model.INSTALLED;
+        TextRecognizer current = recognizer;
+        if (current == null) return;
         Bitmap blank = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888);
         blank.eraseColor(Color.WHITE);
-        recognizer
+        current
             .process(InputImage.fromBitmap(blank, 0))
             .addOnSuccessListener((text) -> ready = true)
             .addOnFailureListener((e) -> failure = "Japanese text recognizer failed to load: " + e.getMessage());
@@ -54,14 +203,33 @@ class OcrEngine {
         return ready && recognizer != null;
     }
 
-    /** Usable for recognition: the recognizer exists and the warm-up did not fail. */
-    boolean isUsable() {
+    /** The recognizer can work on this device at all (it may still be waiting for the model). */
+    boolean isSupported() {
         return recognizer != null && failure == null;
+    }
+
+    /** Usable for recognition right now: supported and the model is installed. */
+    boolean isUsable() {
+        return isSupported() && model == Model.INSTALLED;
+    }
+
+    Model getModel() {
+        return model;
+    }
+
+    /** Download progress 0..1, or -1 when no download is running or the size is unknown. */
+    double getProgress() {
+        return progress;
     }
 
     @Nullable
     String getFailure() {
         return failure;
+    }
+
+    @Nullable
+    String getDownloadFailure() {
+        return downloadFailure;
     }
 
     Task<Text> process(InputImage image) {

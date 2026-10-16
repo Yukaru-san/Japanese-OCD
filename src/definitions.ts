@@ -73,11 +73,35 @@ export interface DeviceSupportResult {
   reason?: string;
   /** The engine that answered. */
   engine?: OcrEngineName;
+  /**
+   * Native engine only: `false` when Google Play Services is missing or too old. The Japanese model
+   * comes from Play Services, so native OCR is then impossible (`supported: false`); use
+   * `setEngine({ engine: 'web' })` instead.
+   */
+  playServices?: boolean;
 }
+
+/**
+ * Where the native Japanese model stands. It is not part of the app: Google Play Services
+ * downloads it once per device.
+ *
+ * - `checking`: the plugin is still asking Play Services.
+ * - `missing`: not on the device and no download running (e.g. the last one failed); call `prepareOcr()`.
+ * - `downloading`: Play Services is downloading it.
+ * - `installed`: on the device; `ready` turns `true` shortly after.
+ * - `unavailable`: no (recent) Google Play Services, so it can never be loaded.
+ */
+export type OcrModelState = 'checking' | 'missing' | 'downloading' | 'installed' | 'unavailable';
 
 export interface OcrReadyResult {
   /** `true` once the Japanese recognizer is loaded and has processed a warm-up image. */
   ready: boolean;
+  /** Native engine only: state of the Play Services model. */
+  model?: OcrModelState;
+  /** Native engine only: download progress from 0 to 1 while `model` is `downloading` (when known). */
+  progress?: number;
+  /** Native engine only: why the model is unavailable or why its last download failed. */
+  message?: string;
 }
 
 export interface PermissionStatus {
@@ -278,9 +302,19 @@ export interface JapaneseOcrPlugin {
   isDeviceSupported(): Promise<DeviceSupportResult>;
 
   /**
-   * Checks whether the Japanese recognizer is loaded. Never throws.
+   * Checks whether the Japanese recognizer is loaded, and on Android where its Play Services
+   * model stands (`model`, `progress`). Never throws.
    */
   isOcrReady(): Promise<OcrReadyResult>;
+
+  /**
+   * Makes sure the Japanese model is on the device: on Android it asks Google Play Services to
+   * download it (the plugin already starts this when the app starts; this waits for it, or retries
+   * after a failed download). Resolves once recognition can run. Rejects with `UNAVAILABLE` without
+   * Google Play Services and with `NOT_READY` when the download fails (e.g. offline).
+   * The web engine just loads its bundled models.
+   */
+  prepareOcr(): Promise<void>;
 
   checkPermissions(): Promise<PermissionStatus>;
 

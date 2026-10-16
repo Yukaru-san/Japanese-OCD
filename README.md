@@ -14,10 +14,16 @@ built-in PaddleOCR engine in the browser (web, iOS WebView, or on Android when y
 
 | Platform | Engine                                                                                     |
 | -------- | ------------------------------------------------------------------------------------------ |
-| Android  | Native ML Kit (Android 7.0 / API 24 or newer). Switchable to the web engine with `setEngine({ engine: 'web' })`. |
+| Android  | Native ML Kit (Android 7.0 / API 24 or newer, with Google Play Services). Switchable to the web engine with `setEngine({ engine: 'web' })`. |
 | Web, iOS | Web engine (PaddleOCR PP-OCRv6 in WebAssembly), same API and same result format. See [Web engine](#web-engine). |
 
 Requires Capacitor 8.
+
+> **Model from Google Play Services.** The Japanese ML Kit model is not part of your app. Google Play Services
+> downloads it once per device (shared with other apps that use it) when the app is installed from the Play Store,
+> or on first start otherwise. This keeps the app about 15 MB smaller, but native OCR only works on devices with
+> Google Play Services, and needs internet the first time. Until the model is there, recognition calls reject with
+> `NOT_READY`; see [Wait for the model](#wait-for-the-model).
 
 ## Quick start
 
@@ -47,8 +53,8 @@ npx cap add android
 
 After any later `npm install` of a Capacitor plugin, run `npm run build && npx cap sync android` again.
 
-That is all the native setup. The plugin adds the camera permission to your Android manifest by itself, and the
-Japanese model is bundled with the app (no download, no Google Play Services needed).
+That is all the native setup. The plugin adds the camera permission and the Play Services model request to your
+Android manifest by itself. The Japanese model is downloaded by Google Play Services, not bundled with the app.
 
 ### 2. Use it
 
@@ -123,7 +129,31 @@ const support = await JapaneseOcr.isDeviceSupported(); // never throws
 // { supported: true, liveCamera: true, handwriting: true, engine: 'native' }
 if (!support.supported) showMessage(support.reason);
 
-const { ready } = await JapaneseOcr.isOcrReady(); // false while the model is still loading; for display only
+const { ready } = await JapaneseOcr.isOcrReady(); // false while the model is still loading
+```
+
+### Wait for the model
+
+On Android the model comes from Google Play Services. The download starts when the app starts; `prepareOcr()`
+waits for it (or starts it again after a failure), so call it before the first recognition:
+
+```ts
+const support = await JapaneseOcr.isDeviceSupported();
+if (support.playServices === false) {
+  await JapaneseOcr.setEngine({ engine: 'web' }); // no Google Play Services: use the built-in web engine
+}
+
+const timer = setInterval(async () => {
+  const { model, progress } = await JapaneseOcr.isOcrReady(); // 'checking' | 'missing' | 'downloading' | 'installed' | 'unavailable'
+  status.textContent = model === 'downloading' && progress != null ? `Loading model ${Math.round(progress * 100)} %` : model ?? '';
+}, 500);
+try {
+  await JapaneseOcr.prepareOcr(); // resolves once recognition can run
+} catch (e) {
+  if (isJapaneseOcrError(e)) status.textContent = e.message; // NOT_READY: download failed (offline?), call again to retry
+} finally {
+  clearInterval(timer);
+}
 ```
 
 ### Camera permission
@@ -366,8 +396,10 @@ recognized; use `selectRegion: true` to let the user frame only the article.
 
 ## Behaviour you can rely on
 
-- **Ready state:** the recognizer starts loading when the app starts. You don't have to wait for it: calls made
-  before it is fully loaded simply take a little longer. `isOcrReady()` is for display only.
+- **Ready state:** on Android the recognizer needs its Play Services model. The plugin checks for it when the app
+  starts and starts the download if it is missing. Until it is installed, recognition calls reject with
+  `NOT_READY`; `prepareOcr()` waits for it. Once installed, calls made before the warm-up is done simply take a
+  little longer.
 - **Permissions:** `startLiveRecognition()` asks for the camera permission itself and throws `PERMISSION_DENIED`
   when it is refused. Call `checkPermissions()` / `requestPermissions()` only if you want to ask earlier.
 - **Events:** `textRecognized` fires for every analyzed frame (default every 500 ms), also with an empty result
@@ -444,8 +476,8 @@ Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to
 
 | Code                    | Meaning                                                       |
 | ----------------------- | ------------------------------------------------------------- |
-| `UNAVAILABLE`           | Not supported here: no camera, no flash, no WebAssembly, or `setEngine({ engine: 'native' })` without a native engine. |
-| `NOT_READY`             | The recognizer failed to load on this device (web: the models could not be loaded). Retrying won't help. |
+| `UNAVAILABLE`           | Not supported here: no Google Play Services (Android), no camera, no flash, no WebAssembly, or `setEngine({ engine: 'native' })` without a native engine. |
+| `NOT_READY`             | Android: the Play Services model is still downloading or its download failed; `prepareOcr()` waits or retries. Web: the models could not be loaded. |
 | `PERMISSION_DENIED`     | The camera permission was refused.                            |
 | `CAMERA_ERROR`          | The camera could not be opened or a photo failed.             |
 | `ALREADY_RUNNING`       | Live recognition (or a capture) is already running.           |
@@ -463,8 +495,9 @@ All methods return Promises. Types are exported from the package.
 | ------------------------------------------ | -------------------------- | -------------------------------------------------------- |
 | `setEngine({ engine })`                    | `void`                     | `'auto'`, `'native'` or `'web'`. See [Web engine](#web-engine). |
 | `getEngine()`                              | `{ engine, active, nativeAvailable }` | `active` is `'native'` or `'web'`.              |
-| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws. |
-| `isOcrReady()`                             | `{ ready }`                | Never throws.                                            |
+| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, handwriting, engine, playServices?, reason? }`. Never throws. |
+| `isOcrReady()`                             | `{ ready, model?, progress?, message? }` | `model`: Play Services model state (Android). Never throws. |
+| `prepareOcr()`                             | `void`                     | Waits for (or retries) the Play Services model download. |
 | `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
 | `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (500) }` |
 | `stopLiveRecognition()`                    | `void`                     |                                                          |
@@ -530,12 +563,15 @@ interface Point { x: number; y: number }
 
 ## Android details
 
-- Added to your manifest automatically: `CAMERA`, `INTERNET` and `ACCESS_NETWORK_STATE` (handwriting
-  model download), and `android.hardware.camera.any` as not required, so devices without camera can still install.
-- The Japanese model adds a few MB per CPU architecture to the app.
+- Added to your manifest automatically: `CAMERA`, `INTERNET` and `ACCESS_NETWORK_STATE` (model downloads),
+  `android.hardware.camera.any` as not required, so devices without camera can still install, and the
+  `com.google.mlkit.vision.DEPENDENCIES` = `ocr_ja` meta-data, so the Play Store downloads the OCR model at install.
+- The Japanese OCR model is not in the app (`play-services-mlkit-text-recognition-japanese`). Devices without Google
+  Play Services (e.g. Huawei without GMS, some custom ROMs) get `supported: false, playServices: false`; use the web
+  engine there.
 - Release builds with R8/minify need no extra rules.
 - Library versions can be overridden in your app's `android/variables.gradle`: `cameraxVersion`,
-  `mlkitTextRecognitionJapaneseVersion`, `mlkitDigitalInkVersion`.
+  `playServicesMlkitTextRecognitionJapaneseVersion`, `playServicesBaseVersion`, `mlkitDigitalInkVersion`.
 
 ## Web engine details
 
@@ -605,8 +641,10 @@ reaches every `addListener` callback. Images travel as paths (`file://`, `conten
 
 ### Android: what happens on each call
 
-- **App start:** `load()` creates the ML Kit recognizer and runs a blank 64×64 image through it, so the model is
-  loaded before the first real call (`isOcrReady()` turns `true`).
+- **App start:** `load()` checks Google Play Services, creates the ML Kit recognizer and asks Play Services
+  (`ModuleInstallClient`) whether the Japanese model is on the device. If not, it starts the download and tracks
+  its progress. Once the model is there, a blank 64×64 image runs through the recognizer, so it is loaded before
+  the first real call (`isOcrReady()` turns `true`).
 - **Live recognition:** after the permission check, `LiveCameraController` puts a CameraX
   `PreviewView` behind the WebView, makes the WebView transparent and sets the `japanese-ocr-live` class on the
   page. Frames (about 1280×720) go to ML Kit at most every `intervalMs`; a frame is skipped while the previous

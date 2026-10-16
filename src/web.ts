@@ -141,6 +141,10 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     return { ready: this.ready };
   }
 
+  async prepareOcr(): Promise<void> {
+    await this.ensureOcr();
+  }
+
   // Permissions
 
   async checkPermissions(): Promise<PermissionStatus> {

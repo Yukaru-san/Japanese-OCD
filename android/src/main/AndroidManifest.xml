@@ -6,4 +6,12 @@
 
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
+    <application>
+        <!-- Asks Google Play to download the Japanese OCR model when the app is installed from the
+             Play Store. Sideloaded apps get it on first start instead (OcrEngine.initialize). -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr_ja" />
+    </application>
+
 </manifest>
