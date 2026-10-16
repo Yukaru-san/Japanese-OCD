@@ -1,12 +1,31 @@
 // The "Engine" and "Status" sections: engine choice (kept in localStorage across app starts)
 // and what the plugin reports about the device, its models and the camera permission.
 import { JapaneseOcr } from 'capacitor-japanese-ocr';
-import type { EngineOptions } from 'capacitor-japanese-ocr';
+import type { EngineOptions, OcrReadyResult } from 'capacitor-japanese-ocr';
 
 import { setLive } from './live';
 import { $, log, run } from './ui';
 
 const ENGINE_KEY = 'ocr-engine';
+
+const MODEL_TEXT: Record<NonNullable<OcrReadyResult['model']>, string> = {
+  checking: 'wird geprüft …',
+  missing: 'nicht auf dem Gerät',
+  downloading: 'wird von Google Play Services geladen',
+  installed: 'installiert',
+  unavailable: 'nicht verfügbar (keine Google Play Services)',
+};
+
+/** Pending automatic refresh while the model is still being checked or downloaded. */
+let modelTimer: ReturnType<typeof setTimeout> | undefined;
+
+function modelText(state: OcrReadyResult): string {
+  if (!state.model) return 'gebündelt (Web-Engine)';
+  let text = MODEL_TEXT[state.model];
+  if (state.model === 'downloading' && state.progress != null) text += ` (${Math.round(state.progress * 100)} %)`;
+  if (state.message) text += ` · ${state.message}`;
+  return text;
+}
 
 function storedEngine(): EngineOptions['engine'] {
   try {
@@ -58,8 +77,14 @@ export async function refreshStatus(): Promise<void> {
     : `nein: ${support.reason ?? ''}`;
   if (support.engine) $('supported').textContent += ` · Engine: ${support.engine}`;
 
-  const { ready } = await JapaneseOcr.isOcrReady();
-  $('ready').textContent = ready ? 'ja' : 'nein';
+  const ocrState = await JapaneseOcr.isOcrReady();
+  $('ready').textContent = ocrState.ready ? 'ja' : 'nein';
+  $('ocr-model').textContent = modelText(ocrState);
+  // Follow the download (and the warm-up after it) without pressing "Aktualisieren".
+  clearTimeout(modelTimer);
+  if (ocrState.model === 'checking' || ocrState.model === 'downloading' || (ocrState.model === 'installed' && !ocrState.ready)) {
+    modelTimer = setTimeout(() => void refreshStatus(), 1000);
+  }
 
   const handwritingReady = await JapaneseOcr.isHandwritingReady();
   $('handwriting-ready').textContent = handwritingReady.ready ? 'geladen' : 'nicht geladen (lädt beim ersten Schreiben)';
@@ -77,6 +102,12 @@ export function initStatus(): void {
   $('refresh').onclick = () => void refreshStatus();
   $('request-permission').onclick = async () => {
     await run('requestPermissions', () => JapaneseOcr.requestPermissions());
+    await refreshStatus();
+  };
+  $('prepare-ocr').onclick = async () => {
+    const pending = run('prepareOcr', () => JapaneseOcr.prepareOcr());
+    await refreshStatus();
+    await pending;
     await refreshStatus();
   };
 }

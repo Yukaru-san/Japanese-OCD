@@ -1,11 +1,13 @@
 # JP OCR Test App
 
-Test app for [`capacitor-japanese-ocr`](https://github.com/Yukaru-san/Japanese-OCD/tree/main). It is a plain
+Test app for [`capacitor-japanese-ocr`](https://github.com/Yukaru-san/Japanese-OCD/tree/claude/project-thread-5sqnyx)
+in its Play Services variant: the Japanese ML Kit model is not in the APK but downloaded by Google Play Services. It is a plain
 Vite + TypeScript page wrapped in a Capacitor Android app and uses every feature of the plugin, so it can be tried
 on a phone and tested in a browser:
 
 - **Engine:** switch between the native engine (ML Kit) and the web engine (PaddleOCR in the WebView).
-- **Status:** `isDeviceSupported()`, `isOcrReady()`, camera permission and the handwriting model.
+- **Status:** `isDeviceSupported()`, `isOcrReady()`, the OCR model from Google Play Services (state, download
+  progress, "OCR-Modell laden" calls `prepareOcr()`), camera permission and the handwriting model.
 - **Live camera:** text of the current picture, freeze/resume, torch, and tappable markers over words from the
   app's own glossary (e.g. せかい → „Welt“).
 - **Images:** gallery or file, optionally framed by the user first; text, furigana as ruby, glossary words, photo.

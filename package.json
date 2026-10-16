@@ -15,7 +15,7 @@
     "@capacitor/android": "^8.5.3",
     "@capacitor/clipboard": "^8.0.1",
     "@capacitor/core": "^8.5.3",
-    "capacitor-japanese-ocr": "github:Yukaru-san/Japanese-OCD#main"
+    "capacitor-japanese-ocr": "github:Yukaru-san/Japanese-OCD#claude/project-thread-5sqnyx"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
