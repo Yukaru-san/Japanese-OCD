@@ -1,6 +1,7 @@
-// The live camera: start/stop, the overlay at the bottom (text and buttons) and the
-// glossary markers drawn over the words in the camera picture.
-import { JapaneseOcr } from 'capacitor-japanese-ocr';
+// The live camera: start/stop, the overlay at the bottom (text and buttons), zoom, tap to focus
+// and the glossary markers drawn over the words in the camera picture.
+import { JapaneseOcr, toRubyHtml } from 'capacitor-japanese-ocr';
+import type { OcrResult } from 'capacitor-japanese-ocr';
 
 import { WordOverlay, findWords } from './overlay';
 import { showResult } from './result';
@@ -20,18 +21,60 @@ export function setLive(live: boolean): void {
   $('resume').hidden = true;
   $('live-text').textContent = '';
   $('live-words').textContent = '';
+  $('zoom-row').hidden = true;
   overlay.clear();
   torchOn = false;
 }
 
 async function startLive(): Promise<void> {
   try {
-    await JapaneseOcr.startLiveRecognition({ intervalMs: 400 });
+    // Results arrive smoothed over frames (stabilize is on by default), so they do not jump.
+    await JapaneseOcr.startLiveRecognition();
     setLive(true);
     log('startLiveRecognition ok');
+    await initZoom();
   } catch (error) {
     log('startLiveRecognition', error);
   }
+}
+
+/** Shows the zoom slider when the camera can zoom. */
+async function initZoom(): Promise<void> {
+  const state = await JapaneseOcr.getLiveState();
+  const slider = $<HTMLInputElement>('zoom');
+  if (!state.maxZoom || state.maxZoom <= 1) return;
+  slider.min = String(state.minZoom ?? 1);
+  slider.max = String(Math.min(state.maxZoom, 8));
+  slider.value = String(state.zoom ?? 1);
+  $('zoom-value').textContent = `${Number(slider.value).toFixed(1)}×`;
+  $('zoom-row').hidden = false;
+}
+
+function onZoom(): void {
+  const ratio = Number($<HTMLInputElement>('zoom').value);
+  $('zoom-value').textContent = `${ratio.toFixed(1)}×`;
+  JapaneseOcr.setZoom({ ratio }).catch((error) => log('setZoom', error));
+}
+
+/** A tap on the camera picture (not on a marker or a button) focuses there. */
+function onTapPicture(event: MouseEvent): void {
+  if (!document.body.classList.contains('live')) return;
+  const target = event.target as HTMLElement;
+  if (target.closest('#live-overlay, #word-popup, .word-marker')) return;
+  if (overlay.popupOpen) return overlay.closePopup();
+  JapaneseOcr.focusAt({ x: event.clientX, y: event.clientY }).catch((error) => log('focusAt', error));
+  const ring = $('focus-ring');
+  Object.assign(ring.style, { left: `${event.clientX}px`, top: `${event.clientY}px` });
+  ring.hidden = false;
+  ring.classList.remove('pulse');
+  void ring.offsetWidth; // restart the animation
+  ring.classList.add('pulse');
+}
+
+/** Shows a result in the overlay: the text with furigana as ruby, the glossary words and markers. */
+function showLive(result: OcrResult): void {
+  $('live-text').innerHTML = toRubyHtml(result) || '(kein Text erkannt)';
+  showLiveWords(overlay.render(result));
 }
 
 function showLiveWords(matches: ReturnType<typeof findWords>): void {
@@ -44,8 +87,7 @@ async function capture(): Promise<void> {
   const result = await run('captureFrame', () => JapaneseOcr.captureFrame({ saveImage: true }));
   if (!result) return;
   showResult(result);
-  $('live-text').textContent = result.text || '(kein Text erkannt)';
-  showLiveWords(overlay.render(result));
+  showLive(result);
   $('capture').hidden = true;
   $('resume').hidden = false;
 }
@@ -69,7 +111,9 @@ async function toggleTorch(): Promise<void> {
 /** Registers the plugin's live events. Listeners stay for the whole app run, across start and stop. */
 export async function initLiveListeners(): Promise<void> {
   await JapaneseOcr.addListener('textRecognized', (result) => {
-    $('live-text').textContent = result.text;
+    // While an explanation is open the markers stay still, so the word stays where it was tapped.
+    if (overlay.popupOpen) return;
+    $('live-text').innerHTML = toRubyHtml(result);
     showLiveWords(overlay.render(result));
   });
   await JapaneseOcr.addListener('liveRecognitionError', (error) => log('live', error));
@@ -81,4 +125,6 @@ export function initLive(): void {
   $('resume').onclick = () => void resume();
   $('stop').onclick = () => void stopLive();
   $('torch').onclick = () => void toggleTorch();
+  $('zoom').oninput = onZoom;
+  document.addEventListener('click', onTapPicture);
 }

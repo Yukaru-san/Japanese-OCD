@@ -35,7 +35,7 @@ const headers = [
     name: 'JapaneseOcr',
     methods: promise([
       'isDeviceSupported', 'isOcrReady', 'checkPermissions', 'requestPermissions', 'startLiveRecognition',
-      'stopLiveRecognition', 'captureFrame', 'resumeLiveRecognition', 'getLiveState', 'setTorch',
+      'stopLiveRecognition', 'captureFrame', 'resumeLiveRecognition', 'getLiveState', 'setTorch', 'focusAt', 'setZoom',
       'recognizeImage', 'recognizeFromGallery',
       'recognizeHandwriting', 'prepareHandwriting', 'isHandwritingReady', 'removeAllListeners',
     ]).concat([{ name: 'addListener', rtype: 'callback' }]),
@@ -66,8 +66,17 @@ const browser = await chromium.launch();
 
   await page.click('#start');
   await page.waitForFunction(() => document.getElementById('live-text').textContent.includes('せかい'));
-  const liveText = await page.textContent('#live-text');
+  // The live text is shown with furigana as <ruby>; without the readings it is the plain text.
+  const plainText = (selector) =>
+    page.$eval(selector, (el) => {
+      const copy = el.cloneNode(true);
+      copy.querySelectorAll('rt').forEach((rt) => rt.remove());
+      copy.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+      return copy.textContent;
+    });
+  const liveText = await plainText('#live-text');
   check('live text reaches the web app', liveText === 'こんにちは、せかい\n日本語を勉強する', JSON.stringify(liveText));
+  check('live text shows furigana as ruby', (await page.textContent('#live-text ruby rt')) === 'にほんご');
 
   const marker = page.locator('.word-marker[data-word="せかい"]');
   await marker.waitFor();
@@ -78,11 +87,35 @@ const browser = await chromium.launch();
   const words = await page.$$eval('.word-marker', (els) => els.map((e) => e.dataset.word));
   check('glossary words found', ['こんにちは', 'せかい', '日本語', '勉強'].every((w) => words.includes(w)), words.join(','));
 
+  // Markers are moved, not recreated, so a tap is not lost when the next frame arrives.
+  await page.evaluate(() => (window.__marker = document.querySelector('.word-marker[data-word="せかい"]')));
+  await page.waitForTimeout(1000);
+  check(
+    'marker survives the next frames',
+    await page.evaluate(() => window.__marker.isConnected && window.__marker === document.querySelector('.word-marker[data-word="せかい"]')),
+  );
+
+  await page.waitForFunction(() => !document.getElementById('zoom-row').hidden);
+  await page.$eval('#zoom', (el) => {
+    el.value = '2';
+    el.dispatchEvent(new Event('input'));
+  });
+  await page.waitForTimeout(100);
+  check('zoom slider zooms the camera', (await page.evaluate(() => window.__fakeAndroid.zoom)) === 2);
+  await page.mouse.click(200, 450);
+  await page.waitForTimeout(100);
+  const focus = await page.evaluate(() => window.__fakeAndroid.focus);
+  check('tap on the picture focuses there', focus?.x === 200 && focus?.y === 450, JSON.stringify(focus));
+
   await page.screenshot({ path: join(shots, '1-live.png') });
   await marker.click();
   const popup = await page.textContent('#word-popup');
   check('tap shows own explanation for せかい', popup.includes('Welt') && popup.includes('sekai') && popup.includes('世界'), popup);
   await page.screenshot({ path: join(shots, '2-explanation.png') });
+  await page.waitForTimeout(700);
+  check('explanation stays open while frames arrive', !(await page.locator('#word-popup').isHidden()));
+  await page.mouse.click(200, 450);
+  check('tap next to it closes the explanation', await page.locator('#word-popup').isHidden());
 
   await page.click('#capture');
   await page.waitForFunction(() => !document.getElementById('resume').hidden);

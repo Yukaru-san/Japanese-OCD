@@ -91,10 +91,14 @@ export function findWords(result: OcrResult): WordMatch[] {
   return matches;
 }
 
-/** Draws tappable markers over glossary words and opens an explanation on tap. */
+/**
+ * Draws tappable markers over glossary words and opens an explanation on tap. Markers are kept
+ * from frame to frame and only moved, so a tap is not lost when the next live result arrives.
+ */
 export class WordOverlay {
   private readonly layer: HTMLElement;
   private readonly popup: HTMLElement;
+  private readonly markers = new Map<string, { element: HTMLButtonElement; match: WordMatch; box: Rect }>();
 
   constructor(layer: HTMLElement, popup: HTMLElement) {
     this.layer = layer;
@@ -102,35 +106,59 @@ export class WordOverlay {
     popup.addEventListener('click', () => this.closePopup());
   }
 
+  /** `true` while an explanation is shown; the live view keeps the markers still meanwhile. */
+  get popupOpen(): boolean {
+    return !this.popup.hidden;
+  }
+
   render(result: OcrResult): WordMatch[] {
     const matches = findWords(result);
-    this.layer.replaceChildren(
-      ...matches.flatMap((match) => {
-        const box = match.box;
-        if (!box) return [];
-        const marker = document.createElement('button');
-        marker.className = 'word-marker';
-        marker.dataset.word = match.word;
-        marker.title = match.word;
-        const pad = 4;
-        Object.assign(marker.style, {
-          left: `${box.left - pad}px`,
-          top: `${box.top - pad}px`,
-          width: `${box.right - box.left + pad * 2}px`,
-          height: `${box.bottom - box.top + pad * 2}px`,
-        });
-        marker.addEventListener('click', (event) => {
+    // Key: the word and which occurrence of it this is. Stabilized live results keep their order.
+    const count = new Map<string, number>();
+    const seen = new Set<string>();
+    for (const match of matches) {
+      const n = count.get(match.word) ?? 0;
+      count.set(match.word, n + 1);
+      const box = match.box;
+      if (!box) continue;
+      const key = `${match.word}#${n}`;
+      seen.add(key);
+      let marker = this.markers.get(key);
+      if (!marker) {
+        const element = document.createElement('button');
+        element.className = 'word-marker';
+        element.dataset.word = match.word;
+        element.title = match.word;
+        const created = { element, match, box };
+        element.addEventListener('click', (event) => {
           event.stopPropagation();
-          this.openPopup(match, box);
+          this.openPopup(created.match, created.box);
         });
-        return [marker];
-      }),
-    );
+        this.layer.append(element);
+        this.markers.set(key, created);
+        marker = created;
+      }
+      marker.match = match;
+      marker.box = box;
+      const pad = 4;
+      Object.assign(marker.element.style, {
+        left: `${box.left - pad}px`,
+        top: `${box.top - pad}px`,
+        width: `${box.right - box.left + pad * 2}px`,
+        height: `${box.bottom - box.top + pad * 2}px`,
+      });
+    }
+    for (const [key, marker] of this.markers) {
+      if (seen.has(key)) continue;
+      marker.element.remove();
+      this.markers.delete(key);
+    }
     return matches;
   }
 
   clear(): void {
     this.layer.replaceChildren();
+    this.markers.clear();
     this.closePopup();
   }
 
@@ -151,7 +179,7 @@ export class WordOverlay {
     this.popup.hidden = false;
   }
 
-  private closePopup(): void {
+  closePopup(): void {
     this.popup.hidden = true;
   }
 }

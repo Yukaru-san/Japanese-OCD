@@ -127,6 +127,7 @@ pre {
 
 #live-text {
   font-size: 1.1rem;
+  line-height: 2;
   white-space: pre-wrap;
   max-height: 30vh;
   overflow: auto;
@@ -141,6 +142,12 @@ pre {
 
 .word-marker {
   position: absolute;
+  /* Markers are moved, not recreated, between frames; this smooths the move. */
+  transition:
+    left 0.15s,
+    top 0.15s,
+    width 0.15s,
+    height 0.15s;
   pointer-events: auto;
   padding: 0;
   background: rgba(250, 204, 21, 0.25);
@@ -231,4 +238,53 @@ pre {
   color: var(--muted);
   font-size: 0.9rem;
   white-space: nowrap;
+}
+
+#live-text rt {
+  font-size: 0.6em;
+  color: #d4d4d4;
+}
+
+#zoom-row {
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#zoom-row[hidden] {
+  display: none;
+}
+
+#zoom {
+  flex: 1;
+}
+
+/* Where the user tapped to focus. */
+#focus-ring {
+  position: fixed;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+}
+
+#focus-ring.pulse {
+  animation: focus-ring 0.8s ease-out;
+}
+
+@keyframes focus-ring {
+  from {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1);
+  }
 }
