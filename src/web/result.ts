@@ -72,6 +72,7 @@ export function arrangeLines(lines: PaddleLine[], regions: Rect[] | null): Arran
   return { lines: kept, words, layout: arrange(input, boxes) };
 }
 
+/** Builds the result object with the same fields, in the same key order, as the Android engine. */
 export function toResult(
   arranged: Arranged,
   imageWidth: number,

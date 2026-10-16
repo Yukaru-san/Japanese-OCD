@@ -198,7 +198,7 @@ class Engine implements PaddleEngine {
     const prob = output.data as Float32Array;
     const [, , ph, pw] = output.dims as number[];
     return boxesFromMap(prob, pw, ph).map((quad) =>
-      quad.map((p) => clampPoint(p, (width / pw) * 1, height / ph, width, height)),
+      quad.map((p) => clampPoint(p, width / pw, height / ph, width, height)),
     );
   }
 
