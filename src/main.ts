@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
 import { JapaneseOcr, toRubyHtml } from 'capacitor-japanese-ocr';
-import type { OcrResult, TranslationOptions } from 'capacitor-japanese-ocr';
+import type { EngineOptions, OcrResult, TranslationOptions } from 'capacitor-japanese-ocr';
 
 import { InkPad } from './handwriting';
 import { WordOverlay, findWords } from './overlay';
@@ -66,12 +66,48 @@ function showResult(result: OcrResult & { imagePath?: string }): void {
   }
 }
 
+const ENGINE_KEY = 'ocr-engine';
+
+function storedEngine(): EngineOptions['engine'] {
+  try {
+    const value = localStorage.getItem(ENGINE_KEY);
+    return value === 'native' || value === 'web' ? value : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+async function showEngine(): Promise<void> {
+  const state = await JapaneseOcr.getEngine();
+  $<HTMLSelectElement>('engine').value = state.engine;
+  const nativeOption = $('engine').querySelector<HTMLOptionElement>('option[value="native"]');
+  if (nativeOption) nativeOption.disabled = !state.nativeAvailable;
+  $('engine-state').textContent =
+    `Aktiv: ${state.active === 'web' ? 'Web (PaddleOCR im WebView, nur Browser-Funktionen)' : 'Nativ (ML Kit)'}` +
+    (state.nativeAvailable ? '' : ' · keine native Engine auf dieser Plattform');
+}
+
+async function changeEngine(engine: EngineOptions['engine']): Promise<void> {
+  const ok = await run(`setEngine(${engine})`, () => JapaneseOcr.setEngine({ engine }).then(() => true));
+  if (ok) {
+    try {
+      localStorage.setItem(ENGINE_KEY, engine);
+    } catch {
+      // Not stored; the choice still applies until the app restarts.
+    }
+    setLive(false);
+  }
+  await showEngine();
+  await refreshStatus();
+}
+
 async function refreshStatus(): Promise<void> {
   const support = await JapaneseOcr.isDeviceSupported();
   $('supported').textContent = support.supported
     ? `ja (Kamera: ${support.liveCamera ? 'ja' : 'nein'}, Übersetzung: ${support.translation ? 'ja' : 'nein'}, ` +
       `Handschrift: ${support.handwriting ? 'ja' : 'nein'})`
     : `nein: ${support.reason ?? ''}`;
+  if (support.engine) $('supported').textContent += ` · Engine: ${support.engine}`;
 
   const { ready } = await JapaneseOcr.isOcrReady();
   $('ready').textContent = ready ? 'ja' : 'nein';
@@ -159,9 +195,10 @@ async function recognizeFile(file: File): Promise<void> {
     reader.readAsDataURL(file);
   });
   try {
+    const started = performance.now();
     const result = await JapaneseOcr.recognizeImage({ base64, translation: translation(), selectRegion: selectRegion() });
     showResult(result);
-    log('recognizeImage ok');
+    log(`recognizeImage ok (${Math.round(performance.now() - started)} ms)`);
   } catch (error) {
     const code = (error as { code?: string }).code;
     log(code === 'CANCELLED' ? 'Auswahl abgebrochen' : 'recognizeImage', code === 'CANCELLED' ? undefined : error);
@@ -170,9 +207,10 @@ async function recognizeFile(file: File): Promise<void> {
 
 async function recognizeGallery(): Promise<void> {
   try {
+    const started = performance.now();
     const result = await JapaneseOcr.recognizeFromGallery({ translation: translation(), selectRegion: selectRegion() });
     showResult(result);
-    log('recognizeFromGallery ok');
+    log(`recognizeFromGallery ok (${Math.round(performance.now() - started)} ms)`);
   } catch (error) {
     const code = (error as { code?: string }).code;
     log(code === 'CANCELLED' ? 'Galerie: keine Auswahl oder abgebrochen' : 'recognizeFromGallery', code === 'CANCELLED' ? undefined : error);
@@ -238,6 +276,12 @@ async function copy(text: string, label: string): Promise<void> {
 }
 
 async function init(): Promise<void> {
+  // Choose the engine before anything else, so every call goes to it.
+  await JapaneseOcr.setEngine({ engine: storedEngine() }).catch((error) => log('setEngine', error));
+  await showEngine();
+  $<HTMLSelectElement>('engine').onchange = (event) =>
+    void changeEngine((event.target as HTMLSelectElement).value as EngineOptions['engine']);
+
   await JapaneseOcr.addListener('textRecognized', (result) => {
     $('live-text').textContent = result.text;
     $('live-translation').textContent = result.translatedText ?? '';

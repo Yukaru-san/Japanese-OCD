@@ -11,6 +11,19 @@
       <h1>JP OCR Test</h1>
 
       <section>
+        <h2>Engine</h2>
+        <label class="row">
+          OCR-Engine
+          <select id="engine">
+            <option value="auto">Automatisch</option>
+            <option value="native">Nativ (ML Kit)</option>
+            <option value="web">Web (PaddleOCR, wie eine Webseite)</option>
+          </select>
+        </label>
+        <p id="engine-state" class="muted"></p>
+      </section>
+
+      <section>
         <h2>Status</h2>
         <dl>
           <dt>isDeviceSupported</dt>
