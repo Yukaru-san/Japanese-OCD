@@ -174,22 +174,29 @@ const browser = await chromium.launch();
   check('missing model rejects with TRANSLATION_NOT_READY', true);
   await page.screenshot({ path: join(shots, '4-panels.png'), fullPage: true });
 
+  check('android: native engine active by default', (await page.textContent('#engine-state')).includes('Nativ'));
+  await page.selectOption('#engine', 'web');
+  await page.waitForFunction(() => document.getElementById('supported').textContent.includes('Engine: web'));
+  check('android: switching to the web engine', (await page.textContent('#engine-state')).includes('Web'));
+  await page.selectOption('#engine', 'native');
+  await page.waitForFunction(() => document.getElementById('supported').textContent.includes('Engine: native'));
+  check('android: switching back to native', (await page.textContent('#engine-state')).includes('Nativ'));
   check('no uncaught page errors (android)', errors.length === 0, errors.join(' | '));
   await page.close();
 }
 
-// Plain web: must report unsupported and throw on use
+// Plain web: the web engine (PaddleOCR) answers; headless Chromium has no camera.
 {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(url);
   await page.waitForFunction(() => document.getElementById('supported').textContent !== '…');
-  check('web: isDeviceSupported is false, no throw', (await page.textContent('#supported')).startsWith('nein'));
-  check('web: isOcrReady is false', (await page.textContent('#ready')) === 'nein');
+  check('web: supported by the web engine', (await page.textContent('#supported')).startsWith('ja') && (await page.textContent('#supported')).includes('Engine: web'), await page.textContent('#supported'));
+  check('web: native engine cannot be chosen', await page.evaluate(() => document.querySelector('#engine option[value="native"]').disabled));
   await page.click('#start');
   await page.waitForFunction(() => document.getElementById('log').textContent.includes('startLiveRecognition'));
-  check('web: startLiveRecognition throws UNAVAILABLE', (await page.textContent('#log')).includes('UNAVAILABLE'));
+  check('web: startLiveRecognition without camera throws UNAVAILABLE', (await page.textContent('#log')).includes('UNAVAILABLE'));
   check('no uncaught page errors (web)', errors.length === 0, errors.join(' | '));
   await page.close();
 }
