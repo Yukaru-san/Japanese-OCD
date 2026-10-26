@@ -17,6 +17,8 @@ const METHODS = [
   'isDeviceSupported',
   'isOcrReady',
   'prepareOcr',
+  'getModelInfo',
+  'deleteModels',
   'checkPermissions',
   'requestPermissions',
   'startLiveRecognition',
@@ -75,6 +77,14 @@ export function createJapaneseOcr(loaders: EngineLoaders = {}): JapaneseOcrPlugi
       return engine[method](...args);
     };
   }
+
+  // The native engine ships with the app: nothing to download or delete
+  const forwarded = plugin as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const getModelInfo = forwarded.getModelInfo;
+  const deleteModels = forwarded.deleteModels;
+  const hasDownloads = () => activeName() === 'web' && !!loaders.web;
+  plugin.getModelInfo = async () => (hasDownloads() ? getModelInfo() : { downloadBytes: 0, storedBytes: 0 });
+  plugin.deleteModels = async () => (hasDownloads() ? deleteModels() : undefined);
 
   plugin.isDeviceSupported = async () => {
     const engine = activeName();

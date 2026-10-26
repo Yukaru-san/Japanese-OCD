@@ -1,7 +1,9 @@
-// Writes the PaddleOCR models, their character list and the ONNX Runtime WebAssembly binary as
-// JavaScript modules next to the compiled web engine, so apps get them through their normal
-// bundler (no CDN, no extra files to copy). Runs after `tsc` in `npm run build`.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// Puts the PaddleOCR models, their character list and ONNX Runtime next to the compiled web engine,
+// so apps get them through their normal bundler (no CDN, no extra files to copy). The models and
+// the WebAssembly binaries are plain files the engine fetches (`new URL('./assets/…', import.meta.url)`,
+// which bundlers copy), so it can report progress and keep them in Cache Storage. Runs after `tsc`
+// in `npm run build`.
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,9 +17,15 @@ const require = createRequire(import.meta.url);
 const ortDist = dirname(require.resolve('onnxruntime-web'));
 
 const write = (name, value) => writeFileSync(join(out, `${name}.js`), `export default ${JSON.stringify(value)};\n`);
+const files = {};
+// Binary files; `.bin` so no server sends them with Content-Encoding (the wasm is gzipped by us)
+const writeFile = (name, bytes) => {
+  writeFileSync(join(out, name), bytes);
+  files[name] = bytes.length;
+};
 
-write('det', readFileSync(join(root, 'web-models/ppocrv6_small_det.onnx')).toString('base64'));
-write('rec', readFileSync(join(root, 'web-models/ppocrv6_small_rec.onnx')).toString('base64'));
+writeFile('det.onnx', readFileSync(join(root, 'web-models/ppocrv6_small_det.onnx')));
+writeFile('rec.onnx', readFileSync(join(root, 'web-models/ppocrv6_small_rec.onnx')));
 write('dict', readFileSync(join(root, 'web-models/ppocrv6_small_rec_dict.txt'), 'utf8').replace(/\n$/, '').split('\n'));
 // ONNX Runtime Web (MIT), copied in so apps don't install the 140 MB onnxruntime-web package. Its
 // `new URL('ort-wasm-simd-threaded.wasm', import.meta.url)` is hidden from bundlers, which would
@@ -32,10 +40,7 @@ if (runtime.includes('"ort-wasm-simd-threaded.wasm",import.meta.url'))
   throw new Error('Unexpected onnxruntime-web build');
 writeFileSync(join(out, 'ort.js'), runtime);
 // The wasm compresses to a quarter; it is unpacked with DecompressionStream at load time.
-write(
-  'ort-wasm',
-  gzipSync(readFileSync(join(ortDist, 'ort-wasm-simd-threaded.wasm')), { level: 9 }).toString('base64'),
-);
+writeFile('ort-wasm.bin', gzipSync(readFileSync(join(ortDist, 'ort-wasm-simd-threaded.wasm')), { level: 9 }));
 
 // The WebGPU build of ONNX Runtime and its own (asyncify) wasm, loaded instead of the two above
 // when the browser has a GPU adapter. Same treatment of the wasm URL.
@@ -49,7 +54,17 @@ if (webgpuRuntime.includes('"ort-wasm-simd-threaded.asyncify.wasm",import.meta.u
   throw new Error('Unexpected onnxruntime-web WebGPU build');
 }
 writeFileSync(join(out, 'ort-webgpu.js'), webgpuRuntime);
-write(
-  'ort-wasm-webgpu',
-  gzipSync(readFileSync(join(ortDist, 'ort-wasm-simd-threaded.asyncify.wasm')), { level: 9 }).toString('base64'),
+writeFile(
+  'ort-wasm-webgpu.bin',
+  gzipSync(readFileSync(join(ortDist, 'ort-wasm-simd-threaded.asyncify.wasm')), { level: 9 }),
 );
+
+// Sizes of the downloads, so apps can tell users before they start one
+const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+write('manifest', { version, files });
+
+// The CommonJS and script-tag builds (rollup, next) resolve `./assets/…` from their own folders
+for (const dir of ['dist/assets', 'dist/cjs/assets']) {
+  mkdirSync(join(root, dir), { recursive: true });
+  for (const name of Object.keys(files)) copyFileSync(join(out, name), join(root, dir, name));
+}

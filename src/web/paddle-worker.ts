@@ -7,18 +7,30 @@ import { loadPaddleEngine } from './paddle';
 import type { WorkerRequest, WorkerResponse } from './paddle-remote';
 
 let engine: Promise<PaddleEngine> | null = null;
+let download: AbortController | null = null;
 
 const post = (message: WorkerResponse) => (self as unknown as Worker).postMessage(message);
 
 self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
 
+  if (request.type === 'cancel') {
+    download?.abort();
+    return;
+  }
+
   if (request.type === 'load') {
-    engine = loadPaddleEngine({ gpu: request.gpu });
+    download = new AbortController();
+    engine = loadPaddleEngine({
+      gpu: request.gpu,
+      signal: download.signal,
+      onProgress: (loadedBytes, totalBytes) => post({ type: 'progress', loadedBytes, totalBytes }),
+    });
     try {
       post({ type: 'loaded', backend: (await engine).backend });
     } catch (e) {
-      post({ type: 'failed', message: e instanceof Error ? e.message : String(e) });
+      const aborted = e instanceof DOMException && e.name === 'AbortError';
+      post({ type: 'failed', message: e instanceof Error ? e.message : String(e), aborted });
     }
     return;
   }
