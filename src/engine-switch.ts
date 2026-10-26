@@ -37,16 +37,27 @@ const METHODS = [
 
 type Forwarded = Pick<JapaneseOcrEngine, (typeof METHODS)[number]>;
 
+/** How the engines are loaded. */
+export interface EngineLoaders {
+  /** Loads the web engine on first use; omitted = native engine only (the `capacitor-japanese-ocr/native` entry). */
+  web?: () => Promise<JapaneseOcrWeb>;
+}
+
+const NO_WEB_ENGINE = 'This build has no web engine (it imports capacitor-japanese-ocr/native).';
+
 /**
  * Creates the `JapaneseOcr` object: the native Android plugin or the web engine (PaddleOCR in the
  * WebView), switchable at runtime with `setEngine()`.
  */
-export function createJapaneseOcr(): JapaneseOcrPlugin {
+export function createJapaneseOcr(loaders: EngineLoaders = {}): JapaneseOcrPlugin {
   const nativeAvailable = Capacitor.getPlatform() === 'android' && Capacitor.isPluginAvailable('JapaneseOcr');
   // No web implementation is registered: the web engine below is used directly instead.
   const native = nativeAvailable ? registerPlugin<JapaneseOcrEngine>('JapaneseOcr') : null;
   let web: Promise<JapaneseOcrWeb> | null = null;
-  const loadWeb = () => (web ??= import('./web').then((m) => new m.JapaneseOcrWeb()));
+  const loadWeb = () =>
+    (web ??= loaders.web
+      ? loaders.web()
+      : Promise.reject(new CapacitorException(NO_WEB_ENGINE, 'UNAVAILABLE' as ExceptionCode)));
 
   let choice: EngineOptions['engine'] = 'auto';
   const activeName = (): OcrEngineName => (choice === 'web' || !native ? 'web' : 'native');
@@ -67,6 +78,10 @@ export function createJapaneseOcr(): JapaneseOcrPlugin {
 
   plugin.isDeviceSupported = async () => {
     const engine = activeName();
+    // Never throws, also without any engine
+    if (engine === 'web' && !loaders.web) {
+      return { supported: false, liveCamera: false, handwriting: false, engine, reason: NO_WEB_ENGINE };
+    }
     const result = await (await active()).engine.isDeviceSupported();
     return { ...result, engine };
   };
@@ -104,7 +119,7 @@ export function createJapaneseOcr(): JapaneseOcrPlugin {
     }
     const handles: PluginListenerHandle[] = [];
     if (native) handles.push(await native.addListener(eventName as 'textRecognized', deliver));
-    handles.push(await (await loadWeb()).addListener(eventName, deliver));
+    if (loaders.web) handles.push(await (await loadWeb()).addListener(eventName, deliver));
     return {
       remove: async () => {
         if (stabilizer) stabilizers.delete(stabilizer);
@@ -126,6 +141,9 @@ export function createJapaneseOcr(): JapaneseOcrPlugin {
     }
     if (engine === 'native' && !native) {
       throw new CapacitorException('There is no native engine on this platform.', 'UNAVAILABLE' as ExceptionCode);
+    }
+    if (engine === 'web' && !loaders.web) {
+      throw new CapacitorException(NO_WEB_ENGINE, 'UNAVAILABLE' as ExceptionCode);
     }
     const before = activeName();
     choice = engine;

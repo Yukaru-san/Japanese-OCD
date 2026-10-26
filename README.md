@@ -12,10 +12,10 @@ built-in PaddleOCR engine in the browser (web, iOS WebView, or on Android when y
 - **Positions:** every block, line and character comes with its position on screen, so you can draw your own
   highlights or buttons over recognized words.
 
-| Platform | Engine                                                                                     |
-| -------- | ------------------------------------------------------------------------------------------ |
+| Platform | Engine                                                                                                           |
+| -------- | ---------------------------------------------------------------------------------------------------------------- |
 | Android  | Native ML Kit (Android 7.0 / API 24 or newer). Switchable to the web engine with `setEngine({ engine: 'web' })`. |
-| Web, iOS | Web engine (PaddleOCR PP-OCRv6 in WebAssembly), same API and same result format. See [Web engine](#web-engine). |
+| Web, iOS | Web engine (PaddleOCR PP-OCRv6 in WebAssembly), same API and same result format. See [Web engine](#web-engine).  |
 
 Requires Capacitor 8.
 
@@ -147,17 +147,17 @@ const onError = await JapaneseOcr.addListener('liveRecognitionError', (e) => con
 
 await JapaneseOcr.startLiveRecognition({ lensFacing: 'back', intervalMs: 300 }); // all optional
 
-await JapaneseOcr.setTorch({ enabled: true });                 // flash on (throws UNAVAILABLE without flash)
+await JapaneseOcr.setTorch({ enabled: true }); // flash on (throws UNAVAILABLE without flash)
 await JapaneseOcr.focusAt({ x: event.clientX, y: event.clientY }); // tap to focus
-await JapaneseOcr.setZoom({ ratio: 2 });                       // bigger text, e.g. for small furigana
-const state = await JapaneseOcr.getLiveState();                // { running, frozen, zoom, minZoom, maxZoom }
+await JapaneseOcr.setZoom({ ratio: 2 }); // bigger text, e.g. for small furigana
+const state = await JapaneseOcr.getLiveState(); // { running, frozen, zoom, minZoom, maxZoom }
 
 const photo = await JapaneseOcr.captureFrame({ saveImage: true }); // freezes the preview
-image.src = Capacitor.convertFileSrc(photo.imagePath!);        // the photo, with photo.text recognized in it
-await JapaneseOcr.resumeLiveRecognition();                     // unfreeze, events continue
+image.src = Capacitor.convertFileSrc(photo.imagePath!); // the photo, with photo.text recognized in it
+await JapaneseOcr.resumeLiveRecognition(); // unfreeze, events continue
 
 await JapaneseOcr.stopLiveRecognition();
-await onText.remove();                                         // or JapaneseOcr.removeAllListeners()
+await onText.remove(); // or JapaneseOcr.removeAllListeners()
 await onError.remove();
 ```
 
@@ -256,12 +256,16 @@ if (char) {
 // A tap on an image you show yourself: convert to image pixels and say so.
 const scale = result.imageWidth / img.clientWidth;
 const r = img.getBoundingClientRect();
-characterAt(result, { x: (event.clientX - r.left) * scale, y: (event.clientY - r.top) * scale }, { coordinates: 'image' });
+characterAt(
+  result,
+  { x: (event.clientX - r.left) * scale, y: (event.clientY - r.top) * scale },
+  { coordinates: 'image' },
+);
 
 // Look up or translate whole sentences:
 for (const sentence of getSentences(result)) {
-  sentence.text;            // '日本語を勉強しています。'
-  sentence.characters;      // its characters, with readings
+  sentence.text; // '日本語を勉強しています。'
+  sentence.characters; // its characters, with readings
   sentence.viewBoundingBox; // where it is on screen
 }
 ```
@@ -316,10 +320,10 @@ text, even when the furigana sits just above the frame. Without a frame the whol
 
 ```ts
 const result = await JapaneseOcr.recognizeFromGallery({ selectRegion: true });
-result.text;        // only the framed text
-result.regions;     // the frames, in image pixels
+result.text; // only the framed text
+result.regions; // the frames, in image pixels
 result.blocks[0].region; // which frame a block came from
-result.rotation;    // 90, 180 or 270 when the user rotated the image
+result.rotation; // 90, 180 or 270 when the user rotated the image
 ```
 
 `recognizeImage({ path, selectRegion: true })` works the same for an image you already have. With your own selection
@@ -332,7 +336,7 @@ down first). Cancelling the selection screen rejects with `CANCELLED`. The scree
 
 ```ts
 const result = await JapaneseOcr.recognizeFromGallery();
-element.innerHTML = toRubyHtml(result);         // <ruby>日本<rt>にほん</rt></ruby>の…, escaped
+element.innerHTML = toRubyHtml(result); // <ruby>日本<rt>にほん</rt></ruby>の…, escaped
 element.innerHTML = toRubyHtml(result.blocks[0]); // or a single block
 ```
 
@@ -378,9 +382,7 @@ async function recognize(): Promise<void> {
     height: canvas.clientHeight,
   });
   // result.candidates: [{ text: '日本語', probability: 0.82, score: 1.9 }, ...], best first
-  list.innerHTML = result.candidates
-    .map((c) => `<li>${c.text} ${Math.round(c.probability * 100)} %</li>`)
-    .join('');
+  list.innerHTML = result.candidates.map((c) => `<li>${c.text} ${Math.round(c.probability * 100)} %</li>`).join('');
 }
 ```
 
@@ -431,7 +433,7 @@ ML Kit finds text pieces in no particular order. The plugin puts them in reading
 
 ```ts
 const result = await JapaneseOcr.recognizeFromGallery();
-result.text;     // "なぜ日本の学校では女子のポニーテールが禁止されていたの？\n2026-10-14\n日本の学校では、…"
+result.text; // "なぜ日本の学校では女子のポニーテールが禁止されていたの？\n2026-10-14\n日本の学校では、…"
 result.furigana; // [{ text: 'にほん', base: '日本', block: 0, start: 2, end: 4, ... }, { text: 'がっこう', base: '学校', ... }, ...]
 result.blocks[0].segments; // [{ text: 'なぜ' }, { text: '日本', reading: 'にほん' }, { text: 'の' }, ...]
 
@@ -475,7 +477,7 @@ results), so the same app code works on both.
 ### Switching engines
 
 ```ts
-await JapaneseOcr.setEngine({ engine: 'web' });    // 'auto' (default), 'native' or 'web'
+await JapaneseOcr.setEngine({ engine: 'web' }); // 'auto' (default), 'native' or 'web'
 const { engine, active, nativeAvailable } = await JapaneseOcr.getEngine();
 ```
 
@@ -488,12 +490,24 @@ const { engine, active, nativeAvailable } = await JapaneseOcr.getEngine();
 
 The choice is not stored; call `setEngine()` again after the app starts if you want to keep it.
 
+### Native engine only
+
+An Android app that never switches to the web engine can leave it out of its bundle (about 25 MB of JavaScript):
+
+```ts
+import { JapaneseOcr } from 'capacitor-japanese-ocr/native';
+```
+
+Same API and helpers as the main entry. `setEngine({ engine: 'web' })` then rejects with `UNAVAILABLE`, and
+`isDeviceSupported()` reports `supported: false` where there is no native engine (web, iOS).
+
 ### Size and loading
 
 - The web engine adds about **25 MB** of JavaScript (about 16.6 MB gzipped): detection model 6.7 MB, recognition
   model 14.2 MB, WebAssembly runtime 4.9 MB, character list 0.1 MB.
 - These are separate chunks that bundlers (Vite, webpack, Rollup) load **only when the web engine is used**. On
-  Android with the native engine they are never loaded, but they are part of the app's web assets.
+  Android with the native engine they are never loaded, but they are part of the app's web assets, unless the app
+  imports `capacitor-japanese-ocr/native` (see above).
 - Loading starts with the first call that recognizes text, or with `prepareOcr()` (e.g. after a "Load text
   recognition" button); `isDeviceSupported()` and `isOcrReady()` don't load anything. `isOcrReady()` turns `true` when
   the models are ready (a few seconds), so the first recognition takes a few seconds longer.
@@ -501,16 +515,16 @@ The choice is not stored; call `setEngine()` again after the app starts if you w
 
 ### How it behaves in the browser
 
-| Feature | Web engine |
-| --- | --- |
-| Live camera | `getUserMedia`. The video is placed full-screen behind the page (like the native preview); your page needs a transparent background where the camera should show. The plugin sets `background: transparent` on `html` and `body` while live recognition runs (class `japanese-ocr-live` on `<html>`). `lensFacing`, `intervalMs`, `stabilize` and `viewBoundingBox` work as on Android. `setZoom()` works where the browser supports the `zoom` constraint; `focusAt()` has no effect (the browser keeps focusing by itself). |
-| Camera permission | The browser's own prompt. `checkPermissions()` uses the Permissions API; `requestPermissions()` opens the camera briefly to ask. Needs HTTPS or `localhost`. |
-| Flash | `setTorch()` works where the browser supports the `torch` constraint (Chrome on Android); otherwise `UNAVAILABLE`. |
-| Capture | `saveImage: true` returns `imagePath` as a `blob:` URL; use it directly as `<img src>`. |
-| Gallery | Opens the browser's file picker. `imagePath` is a `blob:` URL. Cancelling throws `CANCELLED` (in browsers that report it; otherwise when the window gets focus back without a file). |
-| `recognizeImage` | `base64`, or `path` as any URL the page can `fetch()` (`https:`, relative, `blob:`, `data:`). `file://` and `content://` paths don't work in the browser. |
-| Selection screen | `selectRegion: true` shows the same rotate/frame screen, as HTML. |
-| Handwriting | Recognized with the PaddleOCR recognizer, limited to Japanese characters, up to 5 candidates with probabilities. Noticeably less accurate than ML Kit's handwriting model, best with neat, upright characters; `preContext` is ignored. `prepareHandwriting()` only loads the OCR models. |
+| Feature           | Web engine                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live camera       | `getUserMedia`. The video is placed full-screen behind the page (like the native preview); your page needs a transparent background where the camera should show. The plugin sets `background: transparent` on `html` and `body` while live recognition runs (class `japanese-ocr-live` on `<html>`). `lensFacing`, `intervalMs`, `stabilize` and `viewBoundingBox` work as on Android. `setZoom()` works where the browser supports the `zoom` constraint; `focusAt()` has no effect (the browser keeps focusing by itself). |
+| Camera permission | The browser's own prompt. `checkPermissions()` uses the Permissions API; `requestPermissions()` opens the camera briefly to ask. Needs HTTPS or `localhost`.                                                                                                                                                                                                                                                                                                                                                                  |
+| Flash             | `setTorch()` works where the browser supports the `torch` constraint (Chrome on Android); otherwise `UNAVAILABLE`.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Capture           | `saveImage: true` returns `imagePath` as a `blob:` URL; use it directly as `<img src>`.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Gallery           | Opens the browser's file picker. `imagePath` is a `blob:` URL. Cancelling throws `CANCELLED` (in browsers that report it; otherwise when the window gets focus back without a file).                                                                                                                                                                                                                                                                                                                                          |
+| `recognizeImage`  | `base64`, or `path` as any URL the page can `fetch()` (`https:`, relative, `blob:`, `data:`). `file://` and `content://` paths don't work in the browser.                                                                                                                                                                                                                                                                                                                                                                     |
+| Selection screen  | `selectRegion: true` shows the same rotate/frame screen, as HTML.                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Handwriting       | Recognized with the PaddleOCR recognizer, limited to Japanese characters, up to 5 candidates with probabilities. Noticeably less accurate than ML Kit's handwriting model, best with neat, upright characters; `preContext` is ignored. `prepareHandwriting()` only loads the OCR models.                                                                                                                                                                                                                                     |
 
 ### Limits
 
@@ -528,109 +542,145 @@ The choice is not stored; call `setEngine()` again after the app starts if you w
 
 Every rejected call has a `code` and a `message`. Use `isJapaneseOcrError(e)` to narrow a caught value.
 
-| Code                    | Meaning                                                       |
-| ----------------------- | ------------------------------------------------------------- |
+| Code                    | Meaning                                                                                                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `UNAVAILABLE`           | Not supported here: no camera, no flash, no WebAssembly, or `setEngine({ engine: 'native' })` without a native engine. |
-| `NOT_READY`             | The recognizer failed to load on this device (web: the models could not be loaded). Retrying won't help. |
-| `PERMISSION_DENIED`     | The camera permission was refused.                            |
-| `CAMERA_ERROR`          | The camera could not be opened or a photo failed.             |
-| `ALREADY_RUNNING`       | Live recognition (or a capture) is already running.           |
-| `NOT_RUNNING`           | The call needs a running live recognition.                    |
-| `INVALID_ARGUMENT`      | A required option is missing or invalid.                      |
-| `RECOGNITION_FAILED`    | The image could not be loaded or recognized.                  |
-| `CANCELLED`             | The user closed the photo picker or the selection screen.     |
-| `HANDWRITING_NOT_READY` | The handwriting model is missing and could not be downloaded (offline?). Web: the OCR models failed to load. |
+| `NOT_READY`             | The recognizer failed to load on this device (web: the models could not be loaded). Retrying won't help.               |
+| `PERMISSION_DENIED`     | The camera permission was refused.                                                                                     |
+| `CAMERA_ERROR`          | The camera could not be opened or a photo failed.                                                                      |
+| `ALREADY_RUNNING`       | Live recognition (or a capture) is already running.                                                                    |
+| `NOT_RUNNING`           | The call needs a running live recognition.                                                                             |
+| `INVALID_ARGUMENT`      | A required option is missing or invalid.                                                                               |
+| `RECOGNITION_FAILED`    | The image could not be loaded or recognized.                                                                           |
+| `CANCELLED`             | The user closed the photo picker or the selection screen.                                                              |
+| `HANDWRITING_NOT_READY` | The handwriting model is missing and could not be downloaded (offline?). Web: the OCR models failed to load.           |
 
 ## API
 
 All methods return Promises. Types are exported from the package.
 
-| Method                                     | Returns                    | Notes                                                    |
-| ------------------------------------------ | -------------------------- | -------------------------------------------------------- |
-| `setEngine({ engine })`                    | `void`                     | `'auto'`, `'native'` or `'web'`. See [Web engine](#web-engine). |
-| `getEngine()`                              | `{ engine, active, nativeAvailable }` | `active` is `'native'` or `'web'`.              |
-| `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws. |
-| `isOcrReady()`                             | `{ ready, reason? }`       | Never throws. `reason` when loading failed.              |
-| `prepareOcr()`                             | `void`                     | Loads the recognizer now, e.g. once the user agreed.     |
-| `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
-| `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (300), stabilize?: boolean (true) }` |
-| `stopLiveRecognition()`                    | `void`                     |                                                          |
-| `captureFrame(options?)`                   | `CaptureResult`            | `{ saveImage?: boolean }`. With `saveImage`, `imagePath` is a `file://` path; show it with `Capacitor.convertFileSrc()` (web engine: a `blob:` URL). |
-| `resumeLiveRecognition()`                  | `void`                     |                                                          |
-| `getLiveState()`                           | `{ running, frozen, zoom?, minZoom?, maxZoom? }` |                                    |
-| `setTorch({ enabled })`                    | `void`                     |                                                          |
-| `focusAt({ x, y })`                        | `void`                     | CSS pixels in the WebView. Back to autofocus after 5 s. `UNAVAILABLE` if the camera cannot focus on a point. |
-| `setZoom({ ratio })`                       | `void`                     | Clamped to `minZoom`…`maxZoom`. `UNAVAILABLE` if the camera cannot zoom. |
-| `recognizeImage({ path?, base64?, selectRegion?, regions? })` | `OcrResult` | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes. |
-| `recognizeFromGallery({ selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating; web engine: `blob:`). |
-| `clearImages()`                            | `void`                     | Deletes the saved images (`saveImage`, rotated gallery images); web: revokes their `blob:` URLs. |
-| `recognizeHandwriting({ strokes, width?, height?, preContext?, maxResults? })` | `{ text, candidates }` | `strokes: { points: { x, y, t? }[] }[]`; up to 5 `{ text, probability, score }`, best first. |
-| `prepareHandwriting({ requireWifi? })`     | `void`                     | Downloads the handwriting model if needed.               |
-| `isHandwritingReady()`                     | `{ ready }`                | Never throws.                                            |
-| `findText(result, text)` (function)        | `TextMatch[]`              | Position of a word in a result. Not async.               |
-| `isJapaneseOcrError(e)` (function)         | `boolean`                  | Type guard for caught errors.                            |
-| `toRubyHtml(resultOrBlock)` (function)     | `string`                   | Escaped HTML with furigana as `<ruby>`. Not async.       |
-| `getCharacters(result)` (function)         | `OcrCharacter[]`           | Every character with block, `start`/`end`, boxes and `reading`. See [Connect your dictionary](#connect-your-dictionary). |
-| `characterAt(result, { x, y }, { coordinates? }?)` (function) | `OcrCharacter \| undefined` | The character at a tap; `coordinates: 'view'` (default on live results) or `'image'`. |
-| `getSentences(result)` (function)          | `OcrSentence[]`            | `{ text, block, start, end, characters, boundingBox?, viewBoundingBox? }`. |
-| `addListener('textRecognized', fn)`        | `PluginListenerHandle`     | `fn(result: OcrResult)` for every live frame, smoothed (see [Stable results](#live-camera)). |
-| `addListener('liveRecognitionError', fn)`  | `PluginListenerHandle`     | `fn({ code, message })` when a live frame fails.         |
-| `removeAllListeners()`                     | `void`                     |                                                          |
+| Method                                                                         | Returns                                          | Notes                                                                                                                                                |
+| ------------------------------------------------------------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setEngine({ engine })`                                                        | `void`                                           | `'auto'`, `'native'` or `'web'`. See [Web engine](#web-engine).                                                                                      |
+| `getEngine()`                                                                  | `{ engine, active, nativeAvailable }`            | `active` is `'native'` or `'web'`.                                                                                                                   |
+| `isDeviceSupported()`                                                          | `DeviceSupportResult`                            | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws.                                                                             |
+| `isOcrReady()`                                                                 | `{ ready, reason? }`                             | Never throws. `reason` when loading failed.                                                                                                          |
+| `prepareOcr()`                                                                 | `void`                                           | Loads the recognizer now, e.g. once the user agreed.                                                                                                 |
+| `checkPermissions()` / `requestPermissions()`                                  | `{ camera: PermissionState }`                    |                                                                                                                                                      |
+| `startLiveRecognition(options?)`                                               | `void`                                           | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (300), stabilize?: boolean (true) }`                                                          |
+| `stopLiveRecognition()`                                                        | `void`                                           |                                                                                                                                                      |
+| `captureFrame(options?)`                                                       | `CaptureResult`                                  | `{ saveImage?: boolean }`. With `saveImage`, `imagePath` is a `file://` path; show it with `Capacitor.convertFileSrc()` (web engine: a `blob:` URL). |
+| `resumeLiveRecognition()`                                                      | `void`                                           |                                                                                                                                                      |
+| `getLiveState()`                                                               | `{ running, frozen, zoom?, minZoom?, maxZoom? }` |                                                                                                                                                      |
+| `setTorch({ enabled })`                                                        | `void`                                           |                                                                                                                                                      |
+| `focusAt({ x, y })`                                                            | `void`                                           | CSS pixels in the WebView. Back to autofocus after 5 s. `UNAVAILABLE` if the camera cannot focus on a point.                                         |
+| `setZoom({ ratio })`                                                           | `void`                                           | Clamped to `minZoom`…`maxZoom`. `UNAVAILABLE` if the camera cannot zoom.                                                                             |
+| `recognizeImage({ path?, base64?, selectRegion?, regions? })`                  | `OcrResult`                                      | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes.                                      |
+| `recognizeFromGallery({ selectRegion?, regions? }?)`                           | `GalleryResult`                                  | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating; web engine: `blob:`).                                                       |
+| `clearImages()`                                                                | `void`                                           | Deletes the saved images (`saveImage`, rotated gallery images); web: revokes their `blob:` URLs.                                                     |
+| `recognizeHandwriting({ strokes, width?, height?, preContext?, maxResults? })` | `{ text, candidates }`                           | `strokes: { points: { x, y, t? }[] }[]`; up to 5 `{ text, probability, score }`, best first.                                                         |
+| `prepareHandwriting({ requireWifi? })`                                         | `void`                                           | Downloads the handwriting model if needed.                                                                                                           |
+| `isHandwritingReady()`                                                         | `{ ready }`                                      | Never throws.                                                                                                                                        |
+| `findText(result, text)` (function)                                            | `TextMatch[]`                                    | Position of a word in a result. Not async.                                                                                                           |
+| `isJapaneseOcrError(e)` (function)                                             | `boolean`                                        | Type guard for caught errors.                                                                                                                        |
+| `toRubyHtml(resultOrBlock)` (function)                                         | `string`                                         | Escaped HTML with furigana as `<ruby>`. Not async.                                                                                                   |
+| `getCharacters(result)` (function)                                             | `OcrCharacter[]`                                 | Every character with block, `start`/`end`, boxes and `reading`. See [Connect your dictionary](#connect-your-dictionary).                             |
+| `characterAt(result, { x, y }, { coordinates? }?)` (function)                  | `OcrCharacter \| undefined`                      | The character at a tap; `coordinates: 'view'` (default on live results) or `'image'`.                                                                |
+| `getSentences(result)` (function)                                              | `OcrSentence[]`                                  | `{ text, block, start, end, characters, boundingBox?, viewBoundingBox? }`.                                                                           |
+| `addListener('textRecognized', fn)`                                            | `PluginListenerHandle`                           | `fn(result: OcrResult)` for every live frame, smoothed (see [Stable results](#live-camera)).                                                         |
+| `addListener('liveRecognitionError', fn)`                                      | `PluginListenerHandle`                           | `fn({ code, message })` when a live frame fails.                                                                                                     |
+| `removeAllListeners()`                                                         | `void`                                           |                                                                                                                                                      |
 
 ### Result types
 
 ```ts
 interface OcrResult {
-  text: string;              // all text in reading order, paragraphs separated by "\n", no furigana
-  blocks: OcrBlock[];        // paragraphs in reading order
-  furigana: OcrFurigana[];   // readings over kanji, not part of text
-  vertical: boolean;         // vertical writing detected
-  imageWidth: number;        // size of the image that boundingBox refers to
+  text: string; // all text in reading order, paragraphs separated by "\n", no furigana
+  blocks: OcrBlock[]; // paragraphs in reading order
+  furigana: OcrFurigana[]; // readings over kanji, not part of text
+  vertical: boolean; // vertical writing detected
+  imageWidth: number; // size of the image that boundingBox refers to
   imageHeight: number;
-  regions?: Rect[];          // frames the text was taken from (selectRegion / regions)
-  rotation?: number;         // degrees the user rotated the image in the selection screen
+  regions?: Rect[]; // frames the text was taken from (selectRegion / regions)
+  rotation?: number; // degrees the user rotated the image in the selection screen
 }
 interface CaptureResult extends OcrResult {
-  imagePath?: string;        // with saveImage: true
+  imagePath?: string; // with saveImage: true
 }
 
 interface OcrBlock extends OcrGeometry {
-  text: string; recognizedLanguage: string; lines: OcrLine[];
-  segments: OcrSegment[];    // text split into pieces; pieces with furigana have a reading
-  region?: number;           // index in result.regions
-  trackId?: number;          // live only: same paragraph across frames
+  text: string;
+  recognizedLanguage: string;
+  lines: OcrLine[];
+  segments: OcrSegment[]; // text split into pieces; pieces with furigana have a reading
+  region?: number; // index in result.regions
+  trackId?: number; // live only: same paragraph across frames
 }
-interface OcrSegment { text: string; reading?: string } // e.g. { text: '日本', reading: 'にほん' }
-interface OcrLine extends OcrGeometry { text: string; confidence: number; recognizedLanguage: string; elements: OcrElement[] }
-interface OcrElement extends OcrGeometry { text: string; confidence: number; symbols: OcrSymbol[] }
-interface OcrSymbol extends OcrGeometry { text: string; confidence: number } // one character
+interface OcrSegment {
+  text: string;
+  reading?: string;
+} // e.g. { text: '日本', reading: 'にほん' }
+interface OcrLine extends OcrGeometry {
+  text: string;
+  confidence: number;
+  recognizedLanguage: string;
+  elements: OcrElement[];
+}
+interface OcrElement extends OcrGeometry {
+  text: string;
+  confidence: number;
+  symbols: OcrSymbol[];
+}
+interface OcrSymbol extends OcrGeometry {
+  text: string;
+  confidence: number;
+} // one character
 interface OcrFurigana extends OcrGeometry {
-  text: string;              // the reading, e.g. 'にほん'
-  base?: string;             // the kanji it belongs to, e.g. '日本'
-  block?: number;            // blocks[block].text.slice(start, end) === base
+  text: string; // the reading, e.g. 'にほん'
+  base?: string; // the kanji it belongs to, e.g. '日本'
+  block?: number; // blocks[block].text.slice(start, end) === base
   start?: number;
   end?: number;
 }
 
 interface OcrGeometry {
-  boundingBox?: Rect;        // pixels of the recognized image
+  boundingBox?: Rect; // pixels of the recognized image
   cornerPoints?: Point[];
-  viewBoundingBox?: Rect;    // CSS pixels in the WebView (live and capture only)
+  viewBoundingBox?: Rect; // CSS pixels in the WebView (live and capture only)
   viewCornerPoints?: Point[];
 }
-interface Rect { left: number; top: number; right: number; bottom: number }
-interface Point { x: number; y: number }
+interface Rect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+interface Point {
+  x: number;
+  y: number;
+}
 
 // From getCharacters() / characterAt() / getSentences():
 interface OcrCharacter {
-  text: string; index: number; // index in getCharacters(result)
-  block: number; start: number; end: number; // blocks[block].text.slice(start, end) === text
-  line?: number; boundingBox?: Rect; viewBoundingBox?: Rect;
-  furigana?: number; reading?: string; // the furigana over the word this character belongs to
+  text: string;
+  index: number; // index in getCharacters(result)
+  block: number;
+  start: number;
+  end: number; // blocks[block].text.slice(start, end) === text
+  line?: number;
+  boundingBox?: Rect;
+  viewBoundingBox?: Rect;
+  furigana?: number;
+  reading?: string; // the furigana over the word this character belongs to
 }
 interface OcrSentence {
-  text: string; block: number; start: number; end: number;
-  characters: OcrCharacter[]; boundingBox?: Rect; viewBoundingBox?: Rect;
+  text: string;
+  block: number;
+  start: number;
+  end: number;
+  characters: OcrCharacter[];
+  boundingBox?: Rect;
+  viewBoundingBox?: Rect;
 }
 ```
 
@@ -691,28 +741,28 @@ ML Kit, CameraX, Android UI         PaddleOCR on ONNX Runtime Web, getUserMedia,
 
 `android/.../` stands for `android/src/main/java/com/yukarusan/japaneseocr/`.
 
-| File | What happens there |
-| --- | --- |
-| `src/index.ts` | Package entry: creates `JapaneseOcr`, exports the types, `findText`, `toRubyHtml`, `isJapaneseOcrError`. |
-| `src/definitions.ts`, `src/handwriting.ts` | The public API: method signatures, options, result types, error codes. |
-| `src/engine-switch.ts` | Builds the `JapaneseOcr` object. Forwards each method to the native plugin or to the web engine, registers listeners with both, implements `setEngine` / `getEngine`. |
-| `src/find-text.ts`, `src/ruby.ts`, `src/text-index.ts` | Plain helpers on a result: find a word and its box; render furigana as `<ruby>`; characters, tap lookup and sentences for dictionaries (unit tests in `tests/`, `npm test`). |
-| `android/.../JapaneseOcrPlugin.java` | Android entry point. One `@PluginMethod` per API method: checks options, starts the work, resolves or rejects the call with an error code. |
-| `android/.../OcrEngine.java` | Wraps the ML Kit Japanese recognizer (with a warm-up at app start) and builds the result JSON. |
-| `android/.../ReadingOrder.java` | Reading order, paragraphs, furigana detection and pairing, regions. Plain Java, unit tested. |
-| `android/.../LiveCameraController.java` | CameraX: preview behind the WebView, Full HD frame analysis at the interval, freeze and full-resolution capture, torch, zoom, tap to focus. |
-| `src/live-stabilizer.ts` | Smooths live results over frames (follows paragraphs, hysteresis for new readings, dead band), `trackId`. Tests: `npm test`. |
-| `android/.../ViewMapper.java` | Converts camera image pixels to CSS pixels of the WebView (`viewBoundingBox`). |
-| `android/.../RegionSelector.java` | The full-screen rotate-and-frame dialog (`selectRegion: true`). Texts in `res/values*/strings.xml`. |
-| `android/.../ImageFiles.java` | Paths, base64, decoding photos upright (EXIF) and at most 4096 px, saving JPEGs to the cache. |
-| `android/.../HandwritingEngine.java`, `InkLines.java` | ML Kit Digital Ink; `InkLines` splits strokes into rows and combines the rows' candidates (plain Java, unit tested). |
-| `src/web.ts` | The web engine (`JapaneseOcrWeb`): the same methods and error codes as the Java plugin, built on the modules below. |
-| `src/web/paddle.ts` | Loads the bundled models and runs them: text detection, line recognition, CTC decoding, candidates. |
-| `src/web/result.ts` | Turns PaddleOCR lines into the same `OcrResult` as Android (same fields and key order). |
-| `src/web/reading-order.ts` | Line-by-line TypeScript port of `ReadingOrder.java`. Keep both in sync. |
-| `src/web/geometry.ts` | Convex hull and minimum-area rectangle for the detector's boxes. |
-| `src/web/image.ts`, `live.ts`, `region-selector.ts`, `handwriting.ts` | Browser versions of image loading, live camera, the selection screen and handwriting. |
-| `web-models/`, `scripts/` | The ONNX models and their character list; build scripts (see [Building](#building-and-testing)). |
+| File                                                                  | What happens there                                                                                                                                                           |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`                                                        | Package entry: creates `JapaneseOcr`, exports the types, `findText`, `toRubyHtml`, `isJapaneseOcrError`.                                                                     |
+| `src/definitions.ts`, `src/handwriting.ts`                            | The public API: method signatures, options, result types, error codes.                                                                                                       |
+| `src/engine-switch.ts`                                                | Builds the `JapaneseOcr` object. Forwards each method to the native plugin or to the web engine, registers listeners with both, implements `setEngine` / `getEngine`.        |
+| `src/find-text.ts`, `src/ruby.ts`, `src/text-index.ts`                | Plain helpers on a result: find a word and its box; render furigana as `<ruby>`; characters, tap lookup and sentences for dictionaries (unit tests in `tests/`, `npm test`). |
+| `android/.../JapaneseOcrPlugin.java`                                  | Android entry point. One `@PluginMethod` per API method: checks options, starts the work, resolves or rejects the call with an error code.                                   |
+| `android/.../OcrEngine.java`                                          | Wraps the ML Kit Japanese recognizer (with a warm-up at app start) and builds the result JSON.                                                                               |
+| `android/.../ReadingOrder.java`                                       | Reading order, paragraphs, furigana detection and pairing, regions. Plain Java, unit tested.                                                                                 |
+| `android/.../LiveCameraController.java`                               | CameraX: preview behind the WebView, Full HD frame analysis at the interval, freeze and full-resolution capture, torch, zoom, tap to focus.                                  |
+| `src/live-stabilizer.ts`                                              | Smooths live results over frames (follows paragraphs, hysteresis for new readings, dead band), `trackId`. Tests: `npm test`.                                                 |
+| `android/.../ViewMapper.java`                                         | Converts camera image pixels to CSS pixels of the WebView (`viewBoundingBox`).                                                                                               |
+| `android/.../RegionSelector.java`                                     | The full-screen rotate-and-frame dialog (`selectRegion: true`). Texts in `res/values*/strings.xml`.                                                                          |
+| `android/.../ImageFiles.java`                                         | Paths, base64, decoding photos upright (EXIF) and at most 4096 px, saving JPEGs to the cache.                                                                                |
+| `android/.../HandwritingEngine.java`, `InkLines.java`                 | ML Kit Digital Ink; `InkLines` splits strokes into rows and combines the rows' candidates (plain Java, unit tested).                                                         |
+| `src/web.ts`                                                          | The web engine (`JapaneseOcrWeb`): the same methods and error codes as the Java plugin, built on the modules below.                                                          |
+| `src/web/paddle.ts`                                                   | Loads the bundled models and runs them: text detection, line recognition, CTC decoding, candidates.                                                                          |
+| `src/web/result.ts`                                                   | Turns PaddleOCR lines into the same `OcrResult` as Android (same fields and key order).                                                                                      |
+| `src/web/reading-order.ts`                                            | Line-by-line TypeScript port of `ReadingOrder.java`. Keep both in sync.                                                                                                      |
+| `src/web/geometry.ts`                                                 | Convex hull and minimum-area rectangle for the detector's boxes.                                                                                                             |
+| `src/web/image.ts`, `live.ts`, `region-selector.ts`, `handwriting.ts` | Browser versions of image loading, live camera, the selection screen and handwriting.                                                                                        |
+| `web-models/`, `scripts/`                                             | The ONNX models and their character list; build scripts (see [Building](#building-and-testing)).                                                                             |
 
 ### Between JavaScript and Android
 
