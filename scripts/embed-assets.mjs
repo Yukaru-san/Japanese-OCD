@@ -24,11 +24,32 @@ write('dict', readFileSync(join(root, 'web-models/ppocrv6_small_rec_dict.txt'), 
 // otherwise copy the 14 MB .wasm into the app although it is never fetched (wasmBinary is set).
 const runtime = readFileSync(join(ortDist, 'ort.wasm.bundle.min.mjs'), 'utf8')
   .replace(/\n\/\/# sourceMappingURL=.*\n?$/, '\n')
-  .replaceAll('new URL("ort-wasm-simd-threaded.wasm",import.meta.url)', 'new URL("ort-wasm-simd-threaded.wasm",""+import.meta.url)');
-if (runtime.includes('"ort-wasm-simd-threaded.wasm",import.meta.url')) throw new Error('Unexpected onnxruntime-web build');
+  .replaceAll(
+    'new URL("ort-wasm-simd-threaded.wasm",import.meta.url)',
+    'new URL("ort-wasm-simd-threaded.wasm",""+import.meta.url)',
+  );
+if (runtime.includes('"ort-wasm-simd-threaded.wasm",import.meta.url'))
+  throw new Error('Unexpected onnxruntime-web build');
 writeFileSync(join(out, 'ort.js'), runtime);
 // The wasm compresses to a quarter; it is unpacked with DecompressionStream at load time.
 write(
   'ort-wasm',
   gzipSync(readFileSync(join(ortDist, 'ort-wasm-simd-threaded.wasm')), { level: 9 }).toString('base64'),
+);
+
+// The WebGPU build of ONNX Runtime and its own (asyncify) wasm, loaded instead of the two above
+// when the browser has a GPU adapter. Same treatment of the wasm URL.
+const webgpuRuntime = readFileSync(join(ortDist, 'ort.webgpu.bundle.min.mjs'), 'utf8')
+  .replace(/\n\/\/# sourceMappingURL=.*\n?$/, '\n')
+  .replaceAll(
+    'new URL("ort-wasm-simd-threaded.asyncify.wasm",import.meta.url)',
+    'new URL("ort-wasm-simd-threaded.asyncify.wasm",""+import.meta.url)',
+  );
+if (webgpuRuntime.includes('"ort-wasm-simd-threaded.asyncify.wasm",import.meta.url')) {
+  throw new Error('Unexpected onnxruntime-web WebGPU build');
+}
+writeFileSync(join(out, 'ort-webgpu.js'), webgpuRuntime);
+write(
+  'ort-wasm-webgpu',
+  gzipSync(readFileSync(join(ortDist, 'ort-wasm-simd-threaded.asyncify.wasm')), { level: 9 }).toString('base64'),
 );

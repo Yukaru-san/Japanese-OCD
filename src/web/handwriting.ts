@@ -43,14 +43,6 @@ export function rows(strokes: InkStroke[]): number[][] {
   return result;
 }
 
-/** Handwriting is Japanese: kana, kanji, full-width digits and Japanese punctuation. Latin letters,
- * digits and symbols are left out: they look like kanji (+ 十, 0 口, _ 一) to the recognizer. */
-const JAPANESE = /^[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}ー々〆ヶ〇０-９、。「」『』（）・！？…〜]$/u;
-
-function isJapanese(char: string): boolean {
-  return JAPANESE.test(char);
-}
-
 /**
  * Rows made of flat strokes only (like the bars of 三) are parts of the characters above or
  * below them, not rows of their own: they are joined with the neighbouring row.
@@ -151,7 +143,7 @@ export async function recognizeHandwriting(
       group.map((i) => used[i]),
       groups.length === 1 ? height : null,
     );
-    const found = await engine.recognizeLine(image, { candidates: limit, only: isJapanese });
+    const found = await engine.recognizeLine(image, { candidates: limit, japaneseOnly: true });
     const next = found
       .map((c) => ({ text: c.text.trim(), score: -Math.log(Math.max(c.confidence, 1e-12)) }))
       .filter((c) => c.text);

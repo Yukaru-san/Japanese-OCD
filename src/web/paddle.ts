@@ -1,7 +1,8 @@
 /**
- * PaddleOCR (PP-OCRv6 small) text detection and recognition in the browser, with ONNX Runtime Web
- * (WebAssembly). The model weights and the WebAssembly binary are bundled with the plugin and
- * loaded lazily the first time the engine is used, so nothing is fetched from a CDN.
+ * PaddleOCR (PP-OCRv6 small) text detection and recognition in the browser, with ONNX Runtime Web:
+ * on the GPU (WebGPU) where the browser offers one, else on the CPU (WebAssembly). The model
+ * weights and the runtime are bundled with the plugin and loaded lazily the first time the engine
+ * is used, so nothing is fetched from a CDN. Only the runtime that is used gets loaded.
  *
  * This file only works on pixels; turning images, canvases and videos into pixels is done in
  * `image.ts`.
@@ -58,9 +59,12 @@ export interface DetectOptions {
 export interface LineOptions {
   /** Number of readings to return. @default 5 */
   candidates?: number;
-  /** Only characters for which this returns `true` can be read (e.g. Japanese script only). */
-  only?: (char: string) => boolean;
+  /** Only Japanese script can be read (kana, kanji, full-width digits, Japanese punctuation). */
+  japaneseOnly?: boolean;
 }
+
+/** Where the models run. */
+export type PaddleBackend = 'webgpu' | 'wasm';
 
 export interface PaddleEngine {
   /** Finds text lines in the image and reads them. Lines come in detection order. */
@@ -70,6 +74,16 @@ export interface PaddleEngine {
    * Returns up to `candidates` readings, best first.
    */
   recognizeLine(image: RgbaImage, options?: LineOptions): Promise<PaddleCandidate[]>;
+  /** Where the models run, for diagnostics. */
+  readonly backend: PaddleBackend;
+}
+
+/** Handwriting is Japanese: kana, kanji, full-width digits and Japanese punctuation. Latin letters,
+ * digits and symbols are left out: they look like kanji (+ 十, 0 口, _ 一) to the recognizer. */
+const JAPANESE = /^[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}ー々〆ヶ〇０-９、。「」『』（）・！？…〜]$/u;
+
+export function isJapanese(char: string): boolean {
+  return JAPANESE.test(char);
 }
 
 // Model settings from PP-OCRv6_small_det / _rec inference.yml.
@@ -89,27 +103,70 @@ type Ort = typeof OrtModule;
 
 let loading: Promise<PaddleEngine> | null = null;
 
+export interface LoadOptions {
+  /** `false` keeps the models on the CPU even where WebGPU is available. @default true */
+  gpu?: boolean;
+}
+
 /**
  * Loads the bundled models and returns the engine. Safe to call repeatedly; the models are only
  * loaded once. Rejects when WebAssembly is not available or the models cannot be loaded.
  */
-export function loadPaddleEngine(): Promise<PaddleEngine> {
+export function loadPaddleEngine(options: LoadOptions = {}): Promise<PaddleEngine> {
   if (!loading) {
-    loading = createEngine();
+    loading = createEngine(options.gpu !== false);
     loading.catch(() => (loading = null));
   }
   return loading;
 }
 
-async function createEngine(): Promise<PaddleEngine> {
+async function createEngine(gpu: boolean): Promise<PaddleEngine> {
   if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available in this browser.');
-  const [ort, wasm, det, rec, dict] = await Promise.all([
-    import('./assets/ort.js') as Promise<Ort>,
-    import('./assets/ort-wasm.js').then((m) => gunzip(decodeBase64(m.default))),
+  const [det, rec, dict] = await Promise.all([
     import('./assets/det.js').then((m) => decodeBase64(m.default)),
     import('./assets/rec.js').then((m) => decodeBase64(m.default)),
     import('./assets/dict.js').then((m) => m.default),
   ]);
+  // blank, the dictionary, then the space character.
+  const chars = ['', ...dict, ' '];
+
+  if (gpu && (await hasWebGpu())) {
+    try {
+      return await createSessions('webgpu', det, rec, chars);
+    } catch (e) {
+      // Drivers and browsers differ a lot: anything that fails on the GPU runs on the CPU instead.
+      console.warn('Japanese OCR: WebGPU failed, using WebAssembly.', e);
+    }
+  }
+  return createSessions('wasm', det, rec, chars);
+}
+
+async function hasWebGpu(): Promise<boolean> {
+  const gpu = (globalThis.navigator as { gpu?: { requestAdapter(): Promise<unknown> } } | undefined)?.gpu;
+  if (!gpu) return false;
+  try {
+    return !!(await gpu.requestAdapter());
+  } catch {
+    return false;
+  }
+}
+
+async function createSessions(
+  backend: PaddleBackend,
+  det: Uint8Array,
+  rec: Uint8Array,
+  chars: string[],
+): Promise<PaddleEngine> {
+  const [ort, wasm] =
+    backend === 'webgpu'
+      ? await Promise.all([
+          import('./assets/ort-webgpu.js') as Promise<Ort>,
+          import('./assets/ort-wasm-webgpu.js').then((m) => gunzip(decodeBase64(m.default))),
+        ])
+      : await Promise.all([
+          import('./assets/ort.js') as Promise<Ort>,
+          import('./assets/ort-wasm.js').then((m) => gunzip(decodeBase64(m.default))),
+        ]);
   ort.env.wasm.wasmBinary = wasm;
   // Several threads need SharedArrayBuffer, which browsers only allow on cross-origin isolated
   // pages (COOP/COEP headers). Elsewhere one thread is used.
@@ -119,15 +176,24 @@ async function createEngine(): Promise<PaddleEngine> {
       : 1;
   ort.env.wasm.proxy = false;
   ort.env.logLevel = 'error';
+
+  // On the GPU, the few operations WebGPU lacks run on the CPU (no warning about that)
   const options: OrtModule.InferenceSession.SessionOptions = {
-    executionProviders: ['wasm'],
+    executionProviders: backend === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'],
     graphOptimizationLevel: 'all',
+    logSeverityLevel: 3,
   };
   const detSession = await ort.InferenceSession.create(det, options);
   const recSession = await ort.InferenceSession.create(rec, options);
-  // blank, the dictionary, then the space character.
-  const chars = ['', ...dict, ' '];
-  return new Engine(ort, detSession, recSession, chars);
+  const engine = new Engine(ort, detSession, recSession, chars, backend);
+
+  // A GPU that can't run the models fails here already, not on the user's first image.
+  if (backend === 'webgpu') await engine.recognize(blankImage(64));
+  return engine;
+}
+
+function blankImage(size: number): RgbaImage {
+  return { data: new Uint8ClampedArray(size * size * 4).fill(255), width: size, height: size };
 }
 
 class Engine implements PaddleEngine {
@@ -139,6 +205,7 @@ class Engine implements PaddleEngine {
     private readonly det: OrtModule.InferenceSession,
     private readonly rec: OrtModule.InferenceSession,
     private readonly chars: string[],
+    readonly backend: PaddleBackend,
   ) {}
 
   recognize(image: RgbaImage, options: DetectOptions = {}): Promise<PaddleLine[]> {
@@ -161,7 +228,8 @@ class Engine implements PaddleEngine {
         { x: image.width, y: image.height },
         { x: 0, y: image.height },
       ];
-      const line = await this.read(image, box, Math.max(1, options.candidates ?? 5), false, options.only);
+      const only = options.japaneseOnly ? isJapanese : undefined;
+      const line = await this.read(image, box, Math.max(1, options.candidates ?? 5), false, only);
       return line?.candidates ?? [];
     });
   }

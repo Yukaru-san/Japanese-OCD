@@ -5,4 +5,6 @@ import { createJapaneseOcr } from './engine-switch';
 const JapaneseOcr = createJapaneseOcr({ web: () => import('./web').then((m) => new m.JapaneseOcrWeb()) });
 
 export * from './shared';
+export { configureWebEngine } from './web-options';
+export type { WebEngineOptions } from './web-options';
 export { JapaneseOcr };
