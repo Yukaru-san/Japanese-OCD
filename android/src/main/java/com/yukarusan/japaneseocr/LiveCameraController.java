@@ -111,6 +111,8 @@ class LiveCameraController {
     private ExecutorService captureExecutor;
 
     private volatile boolean running = false;
+    /** Set by `stop()`; a camera provider that arrives afterwards is not bound. */
+    private volatile boolean stopped = false;
     private volatile boolean frozen = false;
     private volatile boolean busy = false;
     private volatile long lastFrameAt = 0;
@@ -135,6 +137,10 @@ class LiveCameraController {
         this.intervalMs = Math.max(0, intervalMs);
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(activity);
         future.addListener(() -> {
+            if (stopped) {
+                callback.onResult("NOT_RUNNING", "Live recognition was stopped while starting.");
+                return;
+            }
             try {
                 cameraProvider = future.get();
                 bind(frontCamera);
@@ -414,6 +420,7 @@ class LiveCameraController {
     }
 
     void stop() {
+        stopped = true;
         running = false;
         frozen = false;
         busy = false;

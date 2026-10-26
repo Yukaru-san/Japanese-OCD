@@ -81,6 +81,9 @@ public class JapaneseOcrPlugin extends Plugin {
     /** Written on the main thread, read from plugin call threads too. */
     private volatile LiveCameraController live;
 
+    /** Counts the stops: a start that is still waiting (permission prompt) when the camera is stopped doesn't open it. */
+    private volatile int liveGeneration = 0;
+
     /** The captureFrame() call waiting for its photo, so stopLiveRecognition() can reject it. */
     @Nullable
     private PluginCall pendingCapture;
@@ -178,6 +181,7 @@ public class JapaneseOcrPlugin extends Plugin {
             call.reject("Live recognition is already running.", ALREADY_RUNNING);
             return;
         }
+        call.getData().put("generation", liveGeneration);
         if (getPermissionState(CAMERA) != PermissionState.GRANTED) {
             requestPermissionForAlias(CAMERA, call, "cameraPermissionCallback");
             return;
@@ -197,15 +201,22 @@ public class JapaneseOcrPlugin extends Plugin {
     private void openCamera(PluginCall call) {
         boolean front = "front".equals(call.getString("lensFacing", "back"));
         long interval = call.getInt("intervalMs", 300);
+        int generation = call.getInt("generation", liveGeneration);
         getActivity().runOnUiThread(() -> {
+            if (generation != liveGeneration) {
+                call.reject("Live recognition was stopped while starting.", NOT_RUNNING);
+                return;
+            }
             if (live != null && live.isRunning()) {
                 call.reject("Live recognition is already running.", ALREADY_RUNNING);
                 return;
             }
-            live = new LiveCameraController(getActivity(), getBridge().getWebView(), ocr, frameListener);
-            live.start(front, interval, (errorCode, message) -> {
+            LiveCameraController controller = new LiveCameraController(getActivity(), getBridge().getWebView(), ocr, frameListener);
+            live = controller;
+            controller.start(front, interval, (errorCode, message) -> {
                 if (errorCode != null) {
-                    live = null;
+                    // A newer start may own the camera by now
+                    if (live == controller) live = null;
                     call.reject(message, errorCode);
                 } else {
                     call.resolve();
@@ -247,6 +258,7 @@ public class JapaneseOcrPlugin extends Plugin {
     }
 
     private void stopLive() {
+        liveGeneration++;
         if (live != null) {
             live.stop();
             live = null;
