@@ -16,6 +16,7 @@ import type { JapaneseOcrEngine, JapaneseOcrWeb } from './web';
 const METHODS = [
   'isDeviceSupported',
   'isOcrReady',
+  'prepareOcr',
   'checkPermissions',
   'requestPermissions',
   'startLiveRecognition',

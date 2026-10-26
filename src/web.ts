@@ -124,10 +124,8 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
 
   async isDeviceSupported(): Promise<DeviceSupportResult> {
     let reason = JapaneseOcrWeb.basicSupport();
-    if (!reason) {
-      void this.load().catch(() => undefined);
-      if (this.failure) reason = this.failure;
-    }
+    // Only reports a failure of an earlier load: the models (about 17 MB) load with the first call that needs them
+    if (!reason && this.failure) reason = this.failure;
     const supported = reason == null;
     const camera = supported && (await JapaneseOcrWeb.hasCamera());
     if (supported && !camera) {
@@ -138,10 +136,12 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     return result;
   }
 
+  async prepareOcr(): Promise<void> {
+    await this.ensureOcr();
+  }
+
   async isOcrReady(): Promise<OcrReadyResult> {
-    const reason = JapaneseOcrWeb.basicSupport();
-    if (!reason) void this.load().catch(() => undefined);
-    const failure = reason ?? this.failure;
+    const failure = JapaneseOcrWeb.basicSupport() ?? this.failure;
     return failure ? { ready: false, reason: failure } : { ready: this.ready };
   }
 

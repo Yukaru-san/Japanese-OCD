@@ -87,8 +87,9 @@ public class JapaneseOcrPlugin extends Plugin {
 
     @Override
     public void load() {
-        // Start loading the recognizer with the app, so the first call doesn't wait for it.
-        if (isSdkSupported()) {
+        // Start loading the recognizer with the app, so the first call doesn't wait for it. Apps that must ask first
+        // (ML Kit sends usage metrics to Google) turn this off with `warmUpOnLoad: false` and call prepareOcr()
+        if (isSdkSupported() && getConfig().getBoolean("warmUpOnLoad", true)) {
             ocr.initialize();
         }
     }
@@ -112,7 +113,7 @@ public class JapaneseOcrPlugin extends Plugin {
         if (!isSdkSupported()) {
             return MIN_SDK_MESSAGE;
         }
-        if (!ocr.isUsable()) {
+        if (ocr.isInitialized() && !ocr.isUsable()) {
             String failure = ocr.getFailure();
             return failure != null ? failure : "The Japanese text recognizer is not available.";
         }
@@ -147,8 +148,15 @@ public class JapaneseOcrPlugin extends Plugin {
         call.resolve(result);
     }
 
-    /** Rejects the call and returns false when OCR cannot run. */
+    @PluginMethod
+    public void prepareOcr(PluginCall call) {
+        if (!ensureOcr(call)) return;
+        call.resolve();
+    }
+
+    /** Rejects the call and returns false when OCR cannot run; creates the recognizer on first use. */
     private boolean ensureOcr(PluginCall call) {
+        if (isSdkSupported()) ocr.initialize();
         String reason = unsupportedReason();
         if (reason != null) {
             call.reject(reason, isSdkSupported() ? NOT_READY : UNAVAILABLE);
