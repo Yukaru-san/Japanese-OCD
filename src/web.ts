@@ -24,6 +24,7 @@ import type {
 import type { LiveCamera } from './web/live';
 import type { PaddleEngine } from './web/paddle';
 import type { ViewMapper } from './web/result';
+import { webEngineOptions } from './web-options';
 
 /** The methods every engine implements; `setEngine`/`getEngine` belong to the switching wrapper. */
 export type JapaneseOcrEngine = Omit<JapaneseOcrPlugin, 'setEngine' | 'getEngine'>;
@@ -41,6 +42,20 @@ function messageOf(e: unknown, fallback: string): string {
 function coded(e: unknown, code: JapaneseOcrErrorCode, fallback: string): CapacitorException {
   if (e instanceof CapacitorException) return e;
   return fail(code, messageOf(e, fallback));
+}
+
+/** Loads the models in the configured worker, or on the page when there is none or it fails. */
+async function loadEngine(): Promise<PaddleEngine> {
+  const gpu = webEngineOptions.gpu !== false;
+  if (webEngineOptions.worker) {
+    try {
+      const { connectPaddleWorker } = await import('./web/paddle-remote');
+      return await connectPaddleWorker(webEngineOptions.worker(), gpu);
+    } catch (e) {
+      console.warn('Japanese OCR: the worker failed, the models run on the page.', e);
+    }
+  }
+  return (await import('./web/paddle')).loadPaddleEngine({ gpu });
 }
 
 /** Live recognition processes frames at most this large (longer side) to keep up. */
@@ -83,14 +98,12 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
       const reason = JapaneseOcrWeb.basicSupport();
       this.engine = reason
         ? Promise.reject(fail('UNAVAILABLE', reason))
-        : import('./web/paddle')
-            .then((m) => m.loadPaddleEngine())
-            .then(async (engine) => {
-              // Warm-up, like the native engine, so the first real image isn't slower.
-              await engine.recognize({ data: new Uint8ClampedArray(64 * 64 * 4).fill(255), width: 64, height: 64 });
-              this.ready = true;
-              return engine;
-            });
+        : loadEngine().then(async (engine) => {
+            // Warm-up, like the native engine, so the first real image isn't slower.
+            await engine.recognize({ data: new Uint8ClampedArray(64 * 64 * 4).fill(255), width: 64, height: 64 });
+            this.ready = true;
+            return engine;
+          });
       this.engine.catch((e) => {
         this.failure = `The Japanese text recognizer failed to load: ${messageOf(e, 'unknown error')}`;
       });

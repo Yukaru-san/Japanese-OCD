@@ -504,7 +504,8 @@ Same API and helpers as the main entry. `setEngine({ engine: 'web' })` then reje
 ### Size and loading
 
 - The web engine adds about **25 MB** of JavaScript (about 16.6 MB gzipped): detection model 6.7 MB, recognition
-  model 14.2 MB, WebAssembly runtime 4.9 MB, character list 0.1 MB.
+  model 14.2 MB, WebAssembly runtime 4.9 MB, character list 0.1 MB. Browsers with WebGPU load the WebGPU runtime
+  (8.9 MB, 6.6 MB gzipped) instead of the WebAssembly runtime; each browser only downloads one of the two.
 - These are separate chunks that bundlers (Vite, webpack, Rollup) load **only when the web engine is used**. On
   Android with the native engine they are never loaded, but they are part of the app's web assets, unless the app
   imports `capacitor-japanese-ocr/native` (see above).
@@ -512,6 +513,26 @@ Same API and helpers as the main entry. `setEngine({ engine: 'web' })` then reje
   recognition" button); `isDeviceSupported()` and `isOcrReady()` don't load anything. `isOcrReady()` turns `true` when
   the models are ready (a few seconds), so the first recognition takes a few seconds longer.
 - Vite warns that these chunks are larger than 500 kB; that is expected (`build.chunkSizeWarningLimit` silences it).
+
+### Speed: WebGPU and a Web Worker
+
+- **WebGPU**: where the browser offers a GPU adapter, the models run on the GPU; anything that fails there (driver,
+  missing operation) falls back to WebAssembly on its own. On a desktop GPU this took a photo of a menu from about
+  1.4 s to 0.15 s. `configureWebEngine({ gpu: false })` keeps the models on the CPU.
+- **Web Worker** (optional): the models run off the page, so scrolling, animations and input keep working while a
+  photo is read (on the page, the same photo blocked it for about 1.4 s). The worker comes from the
+  `capacitor-japanese-ocr/web-worker` entry; your bundler creates it. With Vite:
+
+  ```ts
+  import { configureWebEngine } from 'capacitor-japanese-ocr';
+  import OcrWorker from 'capacitor-japanese-ocr/web-worker?worker';
+
+  // Before the first recognition
+  configureWebEngine({ worker: () => new OcrWorker() });
+  ```
+
+  The worker loads its chunks with `import()`, so Vite needs `worker: { format: 'es' }` in `vite.config`. If the
+  worker can't start, the models run on the page as without it.
 
 ### How it behaves in the browser
 
@@ -583,6 +604,7 @@ All methods return Promises. Types are exported from the package.
 | `isHandwritingReady()`                                                         | `{ ready }`                                      | Never throws.                                                                                                                                        |
 | `findText(result, text)` (function)                                            | `TextMatch[]`                                    | Position of a word in a result. Not async.                                                                                                           |
 | `isJapaneseOcrError(e)` (function)                                             | `boolean`                                        | Type guard for caught errors.                                                                                                                        |
+| `configureWebEngine(options)` (function)                                       | `void`                                           | Web engine: Web Worker and WebGPU, see "Speed". Before the first recognition; not in `/native`.                                                      |
 | `toRubyHtml(resultOrBlock)` (function)                                         | `string`                                         | Escaped HTML with furigana as `<ruby>`. Not async.                                                                                                   |
 | `getCharacters(result)` (function)                                             | `OcrCharacter[]`                                 | Every character with block, `start`/`end`, boxes and `reading`. See [Connect your dictionary](#connect-your-dictionary).                             |
 | `characterAt(result, { x, y }, { coordinates? }?)` (function)                  | `OcrCharacter \| undefined`                      | The character at a tap; `coordinates: 'view'` (default on live results) or `'image'`.                                                                |
@@ -711,8 +733,8 @@ internet for that one download, but no Play Services. Offline and without the mo
   [PP-OCRv6_small_rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx) (Apache-2.0), stored in
   `web-models/` with their weights as float16 to halve the size (they are converted back to float32 when loaded; the
   recognized text matched the original weights in our tests). See [web-models/README.md](web-models/README.md).
-- Runtime: ONNX Runtime Web 1.30.0 (MIT), WebAssembly backend, copied into the package at build time; your app does
-  not install `onnxruntime-web`. The `.wasm` file is embedded in the JavaScript, so no bundler or server
+- Runtime: ONNX Runtime Web 1.30.0 (MIT), its WebAssembly and its WebGPU build, copied into the package at build
+  time; your app does not install `onnxruntime-web`. The `.wasm` file is embedded in the JavaScript, so no bundler or server
   configuration is needed.
 - For contributors: the plugin's own `npm run build` turns the models into the JavaScript chunks in
   `dist/esm/web/assets/`.
