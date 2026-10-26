@@ -447,6 +447,9 @@ recognized; use `selectRegion: true` to let the user frame only the article.
 
 - **Ready state:** the recognizer starts loading when the app starts. You don't have to wait for it: calls made
   before it is fully loaded simply take a little longer. `isOcrReady()` is for display only.
+- **Loading later:** ML Kit sends usage metrics to Google once it runs. To ask the user first, turn off loading at
+  start in `capacitor.config.json` (`"plugins": { "JapaneseOcr": { "warmUpOnLoad": false } }`) and call
+  `prepareOcr()` after they agreed; any other call loads it as well.
 - **Permissions:** `startLiveRecognition()` asks for the camera permission itself and throws `PERMISSION_DENIED`
   when it is refused. Call `checkPermissions()` / `requestPermissions()` only if you want to ask earlier.
 - **Events:** `textRecognized` fires for every analyzed frame (default every 500 ms), also with an empty result
@@ -488,8 +491,9 @@ The choice is not stored; call `setEngine()` again after the app starts if you w
   model 14.2 MB, WebAssembly runtime 4.9 MB, character list 0.1 MB.
 - These are separate chunks that bundlers (Vite, webpack, Rollup) load **only when the web engine is used**. On
   Android with the native engine they are never loaded, but they are part of the app's web assets.
-- Loading starts with the first call; `isOcrReady()` turns `true` when the models are ready (a few seconds). The
-  first recognition therefore takes a few seconds longer.
+- Loading starts with the first call that recognizes text, or with `prepareOcr()` (e.g. after a "Load text
+  recognition" button); `isDeviceSupported()` and `isOcrReady()` don't load anything. `isOcrReady()` turns `true` when
+  the models are ready (a few seconds), so the first recognition takes a few seconds longer.
 - Vite warns that these chunks are larger than 500 kB; that is expected (`build.chunkSizeWarningLimit` silences it).
 
 ### How it behaves in the browser
@@ -544,6 +548,7 @@ All methods return Promises. Types are exported from the package.
 | `getEngine()`                              | `{ engine, active, nativeAvailable }` | `active` is `'native'` or `'web'`.              |
 | `isDeviceSupported()`                      | `DeviceSupportResult`      | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws. |
 | `isOcrReady()`                             | `{ ready, reason? }`       | Never throws. `reason` when loading failed.              |
+| `prepareOcr()`                             | `void`                     | Loads the recognizer now, e.g. once the user agreed.     |
 | `checkPermissions()` / `requestPermissions()` | `{ camera: PermissionState }` |                                                     |
 | `startLiveRecognition(options?)`           | `void`                     | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (300), stabilize?: boolean (true) }` |
 | `stopLiveRecognition()`                    | `void`                     |                                                          |

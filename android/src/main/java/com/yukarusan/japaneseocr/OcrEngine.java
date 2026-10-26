@@ -35,6 +35,7 @@ class OcrEngine {
      * before the first real frame.
      */
     void initialize() {
+        if (recognizer != null) return;
         try {
             recognizer = TextRecognition.getClient(new JapaneseTextRecognizerOptions.Builder().build());
         } catch (Exception e) {
@@ -48,6 +49,11 @@ class OcrEngine {
             .process(InputImage.fromBitmap(blank, 0))
             .addOnSuccessListener((text) -> ready = true)
             .addOnFailureListener((e) -> failure = "Japanese text recognizer failed to load: " + e.getMessage());
+    }
+
+    /** True once initialize() created the recognizer (it may still be warming up). */
+    boolean isInitialized() {
+        return recognizer != null || failure != null;
     }
 
     boolean isReady() {

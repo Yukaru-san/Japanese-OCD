@@ -321,6 +321,13 @@ export interface JapaneseOcrPlugin {
    */
   isOcrReady(): Promise<OcrReadyResult>;
 
+  /**
+   * Loads the recognizer now and resolves once it can be used. Only needed when the app turned off loading at
+   * start (Android: `plugins.JapaneseOcr.warmUpOnLoad: false` in the Capacitor config), e.g. to ask the user first;
+   * every other call loads it as well. Rejects with `UNAVAILABLE` or `NOT_READY` like the calls that need it.
+   */
+  prepareOcr(): Promise<void>;
+
   checkPermissions(): Promise<PermissionStatus>;
 
   requestPermissions(): Promise<PermissionStatus>;
