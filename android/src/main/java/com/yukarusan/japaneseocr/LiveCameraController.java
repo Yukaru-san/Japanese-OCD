@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.drawable.Drawable;
 import android.media.Image;
 import android.util.Size;
 import android.view.View;
@@ -98,6 +99,10 @@ class LiveCameraController {
 
     @Nullable
     private ImageView frozenView;
+
+    /** Background of the WebView before it was made transparent, restored on stop (the app's theme color). */
+    @Nullable
+    private Drawable webViewBackground;
 
     @Nullable
     private ExecutorService analysisExecutor;
@@ -195,6 +200,7 @@ class LiveCameraController {
             0,
             new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         );
+        webViewBackground = webView.getBackground();
         webView.setBackgroundColor(Color.TRANSPARENT);
         setPageLive(true);
     }
@@ -425,7 +431,8 @@ class LiveCameraController {
         if (previewView != null) {
             parent.removeView(previewView);
             previewView = null;
-            webView.setBackgroundColor(Color.WHITE);
+            webView.setBackground(webViewBackground);
+            webViewBackground = null;
             setPageLive(false);
         }
         if (analysisExecutor != null) {
