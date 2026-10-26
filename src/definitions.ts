@@ -307,6 +307,28 @@ export interface LiveState {
   maxZoom?: number;
 }
 
+export interface PrepareOcrOptions {
+  /**
+   * Web engine: cancels the download of the models (rejects with `CANCELLED`); what is loaded already stays stored.
+   * The native engine has nothing to download and ignores it.
+   */
+  signal?: AbortSignal;
+}
+
+/** What the recognizer needs to download before it can run (web engine; the native engine ships with the app). */
+export interface ModelInfo {
+  /** Bytes of the files the recognizer needs on this device (models and runtime), `0` for the native engine. */
+  downloadBytes: number;
+  /** Bytes of them stored on this device already (Cache Storage of the browser). Equal to `downloadBytes` once complete. */
+  storedBytes: number;
+}
+
+/** Payload of the `modelDownloadProgress` event. */
+export interface ModelDownloadProgress {
+  loadedBytes: number;
+  totalBytes: number;
+}
+
 /** Payload of the `liveRecognitionError` event. Same shape as a thrown `JapaneseOcrError`. */
 export type LiveRecognitionErrorEvent = JapaneseOcrError;
 
@@ -325,8 +347,22 @@ export interface JapaneseOcrPlugin {
    * Loads the recognizer now and resolves once it can be used. Only needed when the app turned off loading at
    * start (Android: `plugins.JapaneseOcr.warmUpOnLoad: false` in the Capacitor config), e.g. to ask the user first;
    * every other call loads it as well. Rejects with `UNAVAILABLE` or `NOT_READY` like the calls that need it.
+   * The web engine downloads its models first (see `getModelInfo()`), reports `modelDownloadProgress` and can be
+   * cancelled with `options.signal`.
    */
-  prepareOcr(): Promise<void>;
+  prepareOcr(options?: PrepareOcrOptions): Promise<void>;
+
+  /**
+   * How much the recognizer has to download and how much of it is stored, e.g. to ask the user before a large
+   * download. Never throws; the native engine reports `0` for both.
+   */
+  getModelInfo(): Promise<ModelInfo>;
+
+  /**
+   * Deletes the stored downloads of the web engine (they download again when needed). A loaded recognizer keeps
+   * working until the page reloads. No effect on the native engine.
+   */
+  deleteModels(): Promise<void>;
 
   checkPermissions(): Promise<PermissionStatus>;
 
@@ -429,6 +465,14 @@ export interface JapaneseOcrPlugin {
   addListener(
     eventName: 'liveRecognitionError',
     listenerFunc: (error: LiveRecognitionErrorEvent) => void,
+  ): Promise<PluginListenerHandle>;
+
+  /**
+   * Fired while the web engine downloads its models (`prepareOcr()` or the first call that needs them).
+   */
+  addListener(
+    eventName: 'modelDownloadProgress',
+    listenerFunc: (progress: ModelDownloadProgress) => void,
   ): Promise<PluginListenerHandle>;
 
   removeAllListeners(): Promise<void>;

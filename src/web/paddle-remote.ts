@@ -1,3 +1,4 @@
+import type { DownloadOptions } from './model-files';
 import type {
   DetectOptions,
   LineOptions,
@@ -10,6 +11,7 @@ import type {
 
 export type WorkerRequest =
   | { type: 'load'; gpu: boolean }
+  | { type: 'cancel' }
   | {
       type: 'run';
       id: number;
@@ -20,23 +22,28 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: 'loaded'; backend: PaddleBackend }
-  | { type: 'failed'; message: string }
+  | { type: 'progress'; loadedBytes: number; totalBytes: number }
+  | { type: 'failed'; message: string; aborted: boolean }
   | { type: 'result'; id: number; result: PaddleLine[] | PaddleCandidate[] }
   | { type: 'error'; id: number; message: string };
 
 /**
  * The engine in a Web Worker (`paddle-worker.ts`), behind the same interface as on the page.
  * Rejects when the worker can't start or can't load the models; the caller then loads them on the
- * page instead.
+ * page instead. A cancelled download (`signal`) rejects with an `AbortError`.
  */
-export function connectPaddleWorker(worker: Worker, gpu: boolean): Promise<PaddleEngine> {
+export function connectPaddleWorker(
+  worker: Worker,
+  gpu: boolean,
+  options: DownloadOptions = {},
+): Promise<PaddleEngine> {
   const pending = new Map<number, { resolve: (result: never) => void; reject: (e: Error) => void }>();
   let nextId = 0;
 
   return new Promise((resolve, reject) => {
-    const fail = (message: string) => {
+    const fail = (message: string, aborted = false) => {
       worker.terminate();
-      const error = new Error(message);
+      const error = aborted ? new DOMException(message, 'AbortError') : new Error(message);
       pending.forEach((call) => call.reject(error));
       pending.clear();
       reject(error);
@@ -45,7 +52,8 @@ export function connectPaddleWorker(worker: Worker, gpu: boolean): Promise<Paddl
     worker.addEventListener('error', (event) => fail(event.message || 'The OCR worker failed.'));
     worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
       const response = event.data;
-      if (response.type === 'failed') return fail(response.message);
+      if (response.type === 'progress') return options.onProgress?.(response.loadedBytes, response.totalBytes);
+      if (response.type === 'failed') return fail(response.message, response.aborted);
       if (response.type === 'loaded') return resolve(remoteEngine(response.backend));
 
       const call = pending.get(response.id);
@@ -54,6 +62,8 @@ export function connectPaddleWorker(worker: Worker, gpu: boolean): Promise<Paddl
       else call?.reject(new Error(response.message));
     });
 
+    if (options.signal?.aborted) return fail('The download was cancelled.', true);
+    options.signal?.addEventListener('abort', () => worker.postMessage({ type: 'cancel' } satisfies WorkerRequest));
     worker.postMessage({ type: 'load', gpu } satisfies WorkerRequest);
   });
 

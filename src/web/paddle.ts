@@ -11,6 +11,8 @@ import type * as OrtModule from 'onnxruntime-web';
 
 import type { Pt } from './geometry';
 import { convexHull, corners, dist, minAreaRect } from './geometry';
+import type { DownloadOptions, ModelFile } from './model-files';
+import { downloadFiles } from './model-files';
 
 /** RGBA pixels, like `ImageData`. */
 export interface RgbaImage {
@@ -103,7 +105,7 @@ type Ort = typeof OrtModule;
 
 let loading: Promise<PaddleEngine> | null = null;
 
-export interface LoadOptions {
+export interface LoadOptions extends DownloadOptions {
   /** `false` keeps the models on the CPU even where WebGPU is available. @default true */
   gpu?: boolean;
 }
@@ -114,31 +116,54 @@ export interface LoadOptions {
  */
 export function loadPaddleEngine(options: LoadOptions = {}): Promise<PaddleEngine> {
   if (!loading) {
-    loading = createEngine(options.gpu !== false);
+    loading = createEngine(options.gpu !== false, options);
     loading.catch(() => (loading = null));
   }
   return loading;
 }
 
-async function createEngine(gpu: boolean): Promise<PaddleEngine> {
+async function createEngine(gpu: boolean, download: DownloadOptions): Promise<PaddleEngine> {
   if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available in this browser.');
-  const [det, rec, dict] = await Promise.all([
-    import('./assets/det.js').then((m) => decodeBase64(m.default)),
-    import('./assets/rec.js').then((m) => decodeBase64(m.default)),
+  const backend = await chooseBackend(gpu);
+  const [[det, rec, wasm], dict] = await Promise.all([
+    downloadFiles(engineFiles(backend), download),
     import('./assets/dict.js').then((m) => m.default),
   ]);
   // blank, the dictionary, then the space character.
   const chars = ['', ...dict, ' '];
+  const binary = await gunzip(wasm);
 
-  if (gpu && (await hasWebGpu())) {
+  if (backend === 'webgpu') {
     try {
-      return await createSessions('webgpu', det, rec, chars);
+      return await createSessions('webgpu', det, rec, binary, chars);
     } catch (e) {
       // Drivers and browsers differ a lot: anything that fails on the GPU runs on the CPU instead.
       console.warn('Japanese OCR: WebGPU failed, using WebAssembly.', e);
+      const [cpuWasm] = await downloadFiles([wasmFile('wasm')], download);
+      return createSessions('wasm', det, rec, await gunzip(cpuWasm), chars);
     }
   }
-  return createSessions('wasm', det, rec, chars);
+  return createSessions('wasm', det, rec, binary, chars);
+}
+
+/** Where the models will run: on the GPU where the browser offers a WebGPU adapter. */
+export async function chooseBackend(gpu: boolean): Promise<PaddleBackend> {
+  return gpu && (await hasWebGpu()) ? 'webgpu' : 'wasm';
+}
+
+/** The files the engine downloads for a backend: both models and the runtime's WebAssembly. */
+export function engineFiles(backend: PaddleBackend): ModelFile[] {
+  return [
+    { name: 'det.onnx', url: new URL('./assets/det.onnx', import.meta.url) },
+    { name: 'rec.onnx', url: new URL('./assets/rec.onnx', import.meta.url) },
+    wasmFile(backend),
+  ];
+}
+
+function wasmFile(backend: PaddleBackend): ModelFile {
+  return backend === 'webgpu'
+    ? { name: 'ort-wasm-webgpu.bin', url: new URL('./assets/ort-wasm-webgpu.bin', import.meta.url) }
+    : { name: 'ort-wasm.bin', url: new URL('./assets/ort-wasm.bin', import.meta.url) };
 }
 
 async function hasWebGpu(): Promise<boolean> {
@@ -155,18 +180,12 @@ async function createSessions(
   backend: PaddleBackend,
   det: Uint8Array,
   rec: Uint8Array,
+  wasm: Uint8Array<ArrayBuffer>,
   chars: string[],
 ): Promise<PaddleEngine> {
-  const [ort, wasm] =
-    backend === 'webgpu'
-      ? await Promise.all([
-          import('./assets/ort-webgpu.js') as Promise<Ort>,
-          import('./assets/ort-wasm-webgpu.js').then((m) => gunzip(decodeBase64(m.default))),
-        ])
-      : await Promise.all([
-          import('./assets/ort.js') as Promise<Ort>,
-          import('./assets/ort-wasm.js').then((m) => gunzip(decodeBase64(m.default))),
-        ]);
+  const ort = await (backend === 'webgpu'
+    ? (import('./assets/ort-webgpu.js') as Promise<Ort>)
+    : (import('./assets/ort.js') as Promise<Ort>));
   ort.env.wasm.wasmBinary = wasm;
   // Several threads need SharedArrayBuffer, which browsers only allow on cross-origin isolated
   // pages (COOP/COEP headers). Elsewhere one thread is used.
@@ -559,14 +578,9 @@ function beamSearch(
     .slice(0, count);
 }
 
-function decodeBase64(base64: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
+// The WebAssembly comes gzipped (unless a server already unpacked it on the way)
 async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
   if (typeof DecompressionStream !== 'function')
     throw new Error('DecompressionStream is not available in this browser.');
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));

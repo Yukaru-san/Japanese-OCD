@@ -503,12 +503,20 @@ Same API and helpers as the main entry. `setEngine({ engine: 'web' })` then reje
 
 ### Size and loading
 
-- The web engine adds about **25 MB** of JavaScript (about 16.6 MB gzipped): detection model 6.7 MB, recognition
-  model 14.2 MB, WebAssembly runtime 4.9 MB, character list 0.1 MB. Browsers with WebGPU load the WebGPU runtime
-  (8.9 MB, 6.6 MB gzipped) instead of the WebAssembly runtime; each browser only downloads one of the two.
-- These are separate chunks that bundlers (Vite, webpack, Rollup) load **only when the web engine is used**. On
-  Android with the native engine they are never loaded, but they are part of the app's web assets, unless the app
-  imports `capacitor-japanese-ocr/native` (see above).
+- The web engine downloads about **19 MB** once: detection model 5.0 MB, recognition model 10.6 MB and the
+  WebAssembly runtime 3.7 MB (gzipped by the plugin). Browsers with WebGPU load the WebGPU runtime (6.6 MB) instead,
+  together 22 MB; each browser only downloads one of the two. Plus 0.3 MB of JavaScript (ONNX Runtime, character list).
+- The models and runtimes are plain files next to the plugin's code (`new URL('./assets/…', import.meta.url)`), which
+  bundlers (Vite, webpack, Parcel) copy into the app like any asset; with Rollup, add an asset plugin such as
+  `@web/rollup-plugin-import-meta-assets`. They are only fetched **when the web engine is used**. On Android with the
+  native engine they are never fetched, but they are part of the app's web assets, unless the app imports
+  `capacitor-japanese-ocr/native` (see above).
+- They are kept in **Cache Storage** (`japanese-ocr-models`), so later visits start without network and nothing is
+  downloaded twice. `getModelInfo()` tells how much the download is and how much of it is stored (e.g. to ask the
+  user before a large download), `deleteModels()` removes it. Without Cache Storage (some private modes) the browser's
+  normal cache applies.
+- `prepareOcr({ signal })` downloads with progress (`addListener('modelDownloadProgress', …)`) and can be cancelled
+  with an `AbortController`: it then rejects with `CANCELLED`, and the files loaded so far stay stored.
 - Loading starts with the first call that recognizes text, or with `prepareOcr()` (e.g. after a "Load text
   recognition" button); `isDeviceSupported()` and `isOcrReady()` don't load anything. `isOcrReady()` turns `true` when
   the models are ready (a few seconds), so the first recognition takes a few seconds longer.
@@ -586,7 +594,9 @@ All methods return Promises. Types are exported from the package.
 | `getEngine()`                                                                  | `{ engine, active, nativeAvailable }`            | `active` is `'native'` or `'web'`.                                                                                                                   |
 | `isDeviceSupported()`                                                          | `DeviceSupportResult`                            | `{ supported, liveCamera, handwriting, engine, reason? }`. Never throws.                                                                             |
 | `isOcrReady()`                                                                 | `{ ready, reason? }`                             | Never throws. `reason` when loading failed.                                                                                                          |
-| `prepareOcr()`                                                                 | `void`                                           | Loads the recognizer now, e.g. once the user agreed.                                                                                                 |
+| `prepareOcr(options?)`                                                         | `void`                                           | Loads the recognizer now, e.g. once the user agreed. Web: `options.signal` cancels the download (`CANCELLED`).                                       |
+| `getModelInfo()`                                                               | `{ downloadBytes, storedBytes }`                 | Web engine: size of its download and how much is stored. Native: `0`. Never throws.                                                                  |
+| `deleteModels()`                                                               | `void`                                           | Web engine: deletes the stored download. Native: no effect.                                                                                          |
 | `checkPermissions()` / `requestPermissions()`                                  | `{ camera: PermissionState }`                    |                                                                                                                                                      |
 | `startLiveRecognition(options?)`                                               | `void`                                           | `{ lensFacing?: 'back' \| 'front', intervalMs?: number (300), stabilize?: boolean (true) }`                                                          |
 | `stopLiveRecognition()`                                                        | `void`                                           |                                                                                                                                                      |
@@ -611,6 +621,7 @@ All methods return Promises. Types are exported from the package.
 | `getSentences(result)` (function)                                              | `OcrSentence[]`                                  | `{ text, block, start, end, characters, boundingBox?, viewBoundingBox? }`.                                                                           |
 | `addListener('textRecognized', fn)`                                            | `PluginListenerHandle`                           | `fn(result: OcrResult)` for every live frame, smoothed (see [Stable results](#live-camera)).                                                         |
 | `addListener('liveRecognitionError', fn)`                                      | `PluginListenerHandle`                           | `fn({ code, message })` when a live frame fails.                                                                                                     |
+| `addListener('modelDownloadProgress', fn)`                                     | `PluginListenerHandle`                           | `fn({ loadedBytes, totalBytes })` while the web engine downloads its models.                                                                         |
 | `removeAllListeners()`                                                         | `void`                                           |                                                                                                                                                      |
 
 ### Result types
@@ -734,10 +745,10 @@ internet for that one download, but no Play Services. Offline and without the mo
   `web-models/` with their weights as float16 to halve the size (they are converted back to float32 when loaded; the
   recognized text matched the original weights in our tests). See [web-models/README.md](web-models/README.md).
 - Runtime: ONNX Runtime Web 1.30.0 (MIT), its WebAssembly and its WebGPU build, copied into the package at build
-  time; your app does not install `onnxruntime-web`. The `.wasm` file is embedded in the JavaScript, so no bundler or server
-  configuration is needed.
-- For contributors: the plugin's own `npm run build` turns the models into the JavaScript chunks in
-  `dist/esm/web/assets/`.
+  time; your app does not install `onnxruntime-web`. The `.wasm` files are shipped gzipped next to the models and
+  unpacked in the browser, so no server configuration is needed.
+- For contributors: the plugin's own `npm run build` writes the models, the runtimes and `manifest.js` (their sizes) to
+  `dist/esm/web/assets/` (copies for the CommonJS and script-tag builds in `dist/cjs/assets/` and `dist/assets/`).
 
 ## How it works
 

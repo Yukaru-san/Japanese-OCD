@@ -13,7 +13,9 @@ import type {
   LiveRecognitionOptions,
   FocusOptions,
   LiveState,
+  ModelInfo,
   OcrReadyResult,
+  PrepareOcrOptions,
   OcrResult,
   PermissionStatus,
   Rect,
@@ -22,6 +24,7 @@ import type {
   ZoomOptions,
 } from './definitions';
 import type { LiveCamera } from './web/live';
+import type { DownloadOptions } from './web/model-files';
 import type { PaddleEngine } from './web/paddle';
 import type { ViewMapper } from './web/result';
 import { webEngineOptions } from './web-options';
@@ -45,17 +48,22 @@ function coded(e: unknown, code: JapaneseOcrErrorCode, fallback: string): Capaci
 }
 
 /** Loads the models in the configured worker, or on the page when there is none or it fails. */
-async function loadEngine(): Promise<PaddleEngine> {
+async function loadEngine(download: DownloadOptions): Promise<PaddleEngine> {
   const gpu = webEngineOptions.gpu !== false;
   if (webEngineOptions.worker) {
     try {
       const { connectPaddleWorker } = await import('./web/paddle-remote');
-      return await connectPaddleWorker(webEngineOptions.worker(), gpu);
+      return await connectPaddleWorker(webEngineOptions.worker(), gpu, download);
     } catch (e) {
+      if (isAbort(e)) throw e;
       console.warn('Japanese OCR: the worker failed, the models run on the page.', e);
     }
   }
-  return (await import('./web/paddle')).loadPaddleEngine({ gpu });
+  return (await import('./web/paddle')).loadPaddleEngine({ gpu, ...download });
+}
+
+function isAbort(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError';
 }
 
 /** Live recognition processes frames at most this large (longer side) to keep up. */
@@ -92,31 +100,36 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     return null;
   }
 
-  /** Loads the models once (in the background from the first support check). */
-  private load(): Promise<PaddleEngine> {
+  /** Loads the models once; a failed or cancelled load can be started again. */
+  private load(signal?: AbortSignal): Promise<PaddleEngine> {
     if (!this.engine) {
       const reason = JapaneseOcrWeb.basicSupport();
-      this.engine = reason
+      this.failure = null;
+      const onProgress = (loadedBytes: number, totalBytes: number) =>
+        this.notifyListeners('modelDownloadProgress', { loadedBytes, totalBytes });
+      const engine = (this.engine = reason
         ? Promise.reject(fail('UNAVAILABLE', reason))
-        : loadEngine().then(async (engine) => {
+        : loadEngine({ onProgress, signal }).then(async (engine) => {
             // Warm-up, like the native engine, so the first real image isn't slower.
             await engine.recognize({ data: new Uint8ClampedArray(64 * 64 * 4).fill(255), width: 64, height: 64 });
             this.ready = true;
             return engine;
-          });
-      this.engine.catch((e) => {
-        this.failure = `The Japanese text recognizer failed to load: ${messageOf(e, 'unknown error')}`;
+          }));
+      engine.catch((e) => {
+        if (this.engine === engine) this.engine = null;
+        if (!isAbort(e)) this.failure = `The Japanese text recognizer failed to load: ${messageOf(e, 'unknown error')}`;
       });
     }
     return this.engine;
   }
 
-  private async ensureOcr(): Promise<PaddleEngine> {
+  private async ensureOcr(signal?: AbortSignal): Promise<PaddleEngine> {
     const reason = JapaneseOcrWeb.basicSupport();
     if (reason) throw fail('UNAVAILABLE', reason);
     try {
-      return await this.load();
+      return await this.load(signal);
     } catch (e) {
+      if (isAbort(e)) throw fail('CANCELLED', 'The download of the text recognizer was cancelled.');
       throw fail('NOT_READY', this.failure ?? messageOf(e, 'The Japanese text recognizer is not available.'));
     }
   }
@@ -151,8 +164,27 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     return result;
   }
 
-  async prepareOcr(): Promise<void> {
-    await this.ensureOcr();
+  async prepareOcr(options?: PrepareOcrOptions): Promise<void> {
+    await this.ensureOcr(options?.signal);
+  }
+
+  async getModelInfo(): Promise<ModelInfo> {
+    try {
+      const paddle = await import('./web/paddle');
+      const { storedBytes, sizeOf } = await import('./web/model-files');
+      const files = paddle.engineFiles(await paddle.chooseBackend(webEngineOptions.gpu !== false));
+      return {
+        downloadBytes: files.reduce((sum, file) => sum + sizeOf(file.name), 0),
+        storedBytes: await storedBytes(files),
+      };
+    } catch {
+      return { downloadBytes: 0, storedBytes: 0 };
+    }
+  }
+
+  async deleteModels(): Promise<void> {
+    const { deleteFiles } = await import('./web/model-files');
+    await deleteFiles();
   }
 
   async isOcrReady(): Promise<OcrReadyResult> {
