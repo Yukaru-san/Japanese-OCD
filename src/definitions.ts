@@ -392,6 +392,13 @@ export interface JapaneseOcrPlugin {
   recognizeFromGallery(options?: GalleryOptions): Promise<GalleryResult>;
 
   /**
+   * Deletes the images the plugin saved so far (`captureFrame({ saveImage: true })`, rotated gallery images),
+   * e.g. when the user leaves the scan screen. Paths returned before no longer work afterwards. Web engine: revokes
+   * the `blob:` URLs it created.
+   */
+  clearImages(): Promise<void>;
+
+  /**
    * Recognizes handwritten Japanese from strokes and returns up to 5 candidates with probabilities.
    * Works for single characters, words and whole sentences; a sentence may span several rows written
    * one below the other. Write horizontally. The first call downloads the model (about 20 MB) if

@@ -29,6 +29,7 @@ const METHODS = [
   'setZoom',
   'recognizeImage',
   'recognizeFromGallery',
+  'clearImages',
   'recognizeHandwriting',
   'prepareHandwriting',
   'isHandwritingReady',

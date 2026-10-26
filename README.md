@@ -460,6 +460,9 @@ recognized; use `selectRegion: true` to let the user frame only the article.
 - **Listeners** are independent of start/stop. Remove them with the handle's `remove()` or `removeAllListeners()`.
 - **Start twice** throws `ALREADY_RUNNING`; capture/resume/torch without a running camera throw `NOT_RUNNING`.
 - **Leaving the app** pauses the camera; it resumes when the app comes back.
+- **Saved images** stay in the app's cache (`cache/japanese-ocr/`) until `clearImages()` deletes them, e.g. when the
+  user leaves the scan screen.
+- **Stopping** gives the WebView its background back (the one it had before the camera started).
 
 ## Web engine
 
@@ -560,6 +563,7 @@ All methods return Promises. Types are exported from the package.
 | `setZoom({ ratio })`                       | `void`                     | Clamped to `minZoom`…`maxZoom`. `UNAVAILABLE` if the camera cannot zoom. |
 | `recognizeImage({ path?, base64?, selectRegion?, regions? })` | `OcrResult` | `selectRegion: true` lets the user rotate and frame text first; `regions` limits recognition to your own boxes. |
 | `recognizeFromGallery({ selectRegion?, regions? }?)` | `GalleryResult` | `OcrResult` plus `imagePath` (`content://`, or `file://` after rotating; web engine: `blob:`). |
+| `clearImages()`                            | `void`                     | Deletes the saved images (`saveImage`, rotated gallery images); web: revokes their `blob:` URLs. |
 | `recognizeHandwriting({ strokes, width?, height?, preContext?, maxResults? })` | `{ text, candidates }` | `strokes: { points: { x, y, t? }[] }[]`; up to 5 `{ text, probability, score }`, best first. |
 | `prepareHandwriting({ requireWifi? })`     | `void`                     | Downloads the handwriting model if needed.               |
 | `isHandwritingReady()`                     | `{ ready }`                | Never throws.                                            |

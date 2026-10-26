@@ -645,6 +645,18 @@ public class JapaneseOcrPlugin extends Plugin {
     private static final int MAX_CANDIDATES = 5;
 
     @PluginMethod
+    public void clearImages(PluginCall call) {
+        worker.execute(() -> {
+            int failed = ImageFiles.deleteSaved(getContext());
+            if (failed > 0) {
+                call.reject(failed + " saved images could not be deleted.", RECOGNITION_FAILED);
+                return;
+            }
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
     public void isHandwritingReady(PluginCall call) {
         if (!isSdkSupported()) {
             call.resolve(readyResult(false));

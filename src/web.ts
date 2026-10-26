@@ -64,6 +64,8 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   private ready = false;
   private failure: string | null = null;
   private live: LiveCamera | null = null;
+  /** `blob:` URLs handed out as `imagePath`, revoked by `clearImages()`. */
+  private readonly imageUrls = new Set<string>();
   private pendingCapture: { reject: (e: unknown) => void } | null = null;
 
   // Support checks
@@ -263,7 +265,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
         if (options.saveImage) {
           try {
             const { canvasToBlob } = await import('./web/image');
-            imagePath = URL.createObjectURL(await canvasToBlob(frame));
+            imagePath = this.imageUrl(await canvasToBlob(frame));
           } catch (e) {
             finish(null, fail('CAMERA_ERROR', `Could not save the image: ${messageOf(e, 'unknown error')}`));
             return;
@@ -354,7 +356,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
     const file = await pickImage();
     if (!file) throw fail('CANCELLED', 'No image was selected.');
     await this.ensureOcr();
-    const path = URL.createObjectURL(file);
+    const path = this.imageUrl(file);
     return (await this.recognizeStill(file, regions, !!options.selectRegion, path)) as GalleryResult;
   }
 
@@ -383,7 +385,7 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
       regions = selection.regions.length ? selection.regions : null;
       if (rotation !== 0) {
         try {
-          path = URL.createObjectURL(await image.canvasToBlob(canvas));
+          path = this.imageUrl(await image.canvasToBlob(canvas));
         } catch {
           // Keep the original; the coordinates then refer to the rotated image.
         }
@@ -433,6 +435,17 @@ export class JapaneseOcrWeb extends WebPlugin implements JapaneseOcrEngine {
   }
 
   // Handwriting
+
+  async clearImages(): Promise<void> {
+    this.imageUrls.forEach((url) => URL.revokeObjectURL(url));
+    this.imageUrls.clear();
+  }
+
+  private imageUrl(blob: Blob): string {
+    const url = URL.createObjectURL(blob);
+    this.imageUrls.add(url);
+    return url;
+  }
 
   async isHandwritingReady(): Promise<{ ready: boolean }> {
     return { ready: this.ready };

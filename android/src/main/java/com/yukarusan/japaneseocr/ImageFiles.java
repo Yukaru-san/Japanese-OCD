@@ -90,9 +90,14 @@ final class ImageFiles {
         return 0;
     }
 
+    /** Folder in the app's cache with the photos the plugin saved. */
+    static File savedDir(Context context) {
+        return new File(context.getCacheDir(), "japanese-ocr");
+    }
+
     /** Saves the bitmap as JPEG in {@code <cache>/japanese-ocr/} and returns its {@code file://} URI. */
     static String saveJpeg(Context context, Bitmap bitmap, String prefix) throws IOException {
-        File dir = new File(context.getCacheDir(), "japanese-ocr");
+        File dir = savedDir(context);
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IOException("Cannot create " + dir);
         }
@@ -101,5 +106,17 @@ final class ImageFiles {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out);
         }
         return Uri.fromFile(file).toString();
+    }
+
+    /** Deletes every photo the plugin saved; returns how many could not be deleted. */
+    static int deleteSaved(Context context) {
+        File[] files = savedDir(context).listFiles();
+        if (files == null) return 0;
+
+        int failed = 0;
+        for (File file : files) {
+            if (!file.delete()) failed++;
+        }
+        return failed;
     }
 }
