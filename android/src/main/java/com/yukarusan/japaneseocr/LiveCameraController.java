@@ -7,10 +7,8 @@ import android.graphics.Matrix;
 import android.graphics.drawable.Drawable;
 import android.media.Image;
 import android.util.Size;
-import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
-import android.widget.ImageView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
@@ -96,9 +94,6 @@ class LiveCameraController {
 
     @Nullable
     private PreviewView previewView;
-
-    @Nullable
-    private ImageView frozenView;
 
     /** Background of the WebView before it was made transparent, restored on stop (the app's theme color). */
     @Nullable
@@ -198,7 +193,7 @@ class LiveCameraController {
     private void addPreviewView() {
         ViewGroup parent = (ViewGroup) webView.getParent();
         previewView = new PreviewView(activity);
-        // TextureView based, so getBitmap() works for freezing and the view composes behind the WebView.
+        // TextureView based, so the view composes behind the WebView.
         previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
         previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
         parent.addView(
@@ -284,13 +279,15 @@ class LiveCameraController {
         });
     }
 
-    /** Freezes the preview on the current frame and takes a full-resolution photo. */
+    /** Pauses the recognition and takes a full-resolution photo. */
     void capture(CaptureCallback callback) {
         if (imageCapture == null || previewView == null || captureExecutor == null) {
             callback.onError("Camera is not running");
             return;
         }
-        freezePreview();
+        // No frozen picture over the preview: a native view drawn behind the WebView left the page's transparent
+        // areas black on Samsung devices from then on. The page shows the photo instead.
+        frozen = true;
         ViewMapper.Target target = viewTarget();
         imageCapture.takePicture(
             captureExecutor,
@@ -325,30 +322,7 @@ class LiveCameraController {
         );
     }
 
-    private void freezePreview() {
-        frozen = true;
-        if (previewView == null) return;
-        Bitmap snapshot = previewView.getBitmap();
-        if (snapshot == null) return;
-        if (frozenView == null) {
-            frozenView = new ImageView(activity);
-            frozenView.setScaleType(ImageView.ScaleType.FIT_XY);
-            ViewGroup parent = (ViewGroup) webView.getParent();
-            parent.addView(
-                frozenView,
-                parent.indexOfChild(previewView) + 1,
-                new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            );
-        }
-        frozenView.setImageBitmap(snapshot);
-        frozenView.setVisibility(View.VISIBLE);
-    }
-
     void resume() {
-        if (frozenView != null) {
-            frozenView.setVisibility(View.GONE);
-            frozenView.setImageBitmap(null);
-        }
         frozen = false;
         lastFrameAt = 0;
     }
@@ -431,10 +405,6 @@ class LiveCameraController {
         camera = null;
         imageCapture = null;
         ViewGroup parent = (ViewGroup) webView.getParent();
-        if (frozenView != null) {
-            parent.removeView(frozenView);
-            frozenView = null;
-        }
         if (previewView != null) {
             parent.removeView(previewView);
             previewView = null;
