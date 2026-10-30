@@ -297,7 +297,7 @@ export interface GalleryResult extends OcrResult {
 
 export interface LiveState {
   running: boolean;
-  /** `true` while the preview shows a frame frozen by `captureFrame()`. */
+  /** `true` after `captureFrame()` until `resumeLiveRecognition()` (live events are paused). */
   frozen: boolean;
   /** Current zoom factor; only set while running. */
   zoom?: number;
@@ -384,8 +384,9 @@ export interface JapaneseOcrPlugin {
   stopLiveRecognition(): Promise<void>;
 
   /**
-   * Takes a full-resolution photo, freezes the preview on it and returns the recognized text.
-   * Live events pause until `resumeLiveRecognition()` is called.
+   * Takes a full-resolution photo and returns the recognized text. Live events pause until
+   * `resumeLiveRecognition()` is called. On the web the preview freezes on the photo; on Android it keeps
+   * running behind the page (show the photo on the page).
    */
   captureFrame(options?: CaptureOptions): Promise<CaptureResult>;
 

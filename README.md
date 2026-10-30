@@ -4,7 +4,7 @@ Japanese text recognition (OCR) for Capacitor apps, on the device: with Google M
 built-in PaddleOCR engine in the browser (web, iOS WebView, or on Android when you switch to it).
 
 - **Live camera:** the camera preview runs behind your web page, recognized text arrives as events.
-- **Capture:** freeze the picture and get its text, optionally the photo as a file.
+- **Capture:** take a photo and get its text, optionally the photo as a file.
 - **Gallery & images:** let the user pick a photo from the gallery, or pass an image (file path or base64), and
   optionally let them rotate it and frame the text they want.
 - **Handwriting:** the user writes in a drawing area, you get up to 5 candidate words or sentences with their
@@ -79,7 +79,7 @@ async function startOcr(): Promise<void> {
 }
 
 async function capture(): Promise<string> {
-  // 4. Freeze the picture and get its text. The preview stays frozen until resume or stop.
+  // 4. Take a photo and get its text. Live events pause until resume or stop.
   const result = await JapaneseOcr.captureFrame();
   return result.text;
 }
@@ -152,9 +152,9 @@ await JapaneseOcr.focusAt({ x: event.clientX, y: event.clientY }); // tap to foc
 await JapaneseOcr.setZoom({ ratio: 2 }); // bigger text, e.g. for small furigana
 const state = await JapaneseOcr.getLiveState(); // { running, frozen, zoom, minZoom, maxZoom }
 
-const photo = await JapaneseOcr.captureFrame({ saveImage: true }); // freezes the preview
+const photo = await JapaneseOcr.captureFrame({ saveImage: true }); // pauses live events
 image.src = Capacitor.convertFileSrc(photo.imagePath!); // the photo, with photo.text recognized in it
-await JapaneseOcr.resumeLiveRecognition(); // unfreeze, events continue
+await JapaneseOcr.resumeLiveRecognition(); // events continue
 
 await JapaneseOcr.stopLiveRecognition();
 await onText.remove(); // or JapaneseOcr.removeAllListeners()
@@ -456,9 +456,9 @@ recognized; use `selectRegion: true` to let the user frame only the article.
   when it is refused. Call `checkPermissions()` / `requestPermissions()` only if you want to ask earlier.
 - **Events:** `textRecognized` fires for every analyzed frame (default every 500 ms), also with an empty result
   (`text: ''`, no blocks) when no text is visible, so highlights can be cleared.
-- **Capture:** `captureFrame()` freezes the preview on the photo (`getLiveState().frozen` becomes `true`) and pauses
-  `textRecognized` events until `resumeLiveRecognition()` or `stopLiveRecognition()`. Calling it again while frozen
-  takes a new photo; calling it while a capture is still in progress throws `ALREADY_RUNNING`.
+- **Capture:** `captureFrame()` pauses `textRecognized` events (`getLiveState().frozen` becomes `true`) until
+  `resumeLiveRecognition()` or `stopLiveRecognition()`. On the web the preview also freezes on the photo; on Android
+  it keeps running behind the page, so show the photo there. Calling it again while frozen takes a new photo; calling it while a capture is still in progress throws `ALREADY_RUNNING`.
 - **Listeners** are independent of start/stop. Remove them with the handle's `remove()` or `removeAllListeners()`.
 - **Start twice** throws `ALREADY_RUNNING`; capture/resume/torch without a running camera throw `NOT_RUNNING`.
 - **Leaving the app** pauses the camera; it resumes when the app comes back.
@@ -783,7 +783,7 @@ ML Kit, CameraX, Android UI         PaddleOCR on ONNX Runtime Web, getUserMedia,
 | `android/.../JapaneseOcrPlugin.java`                                  | Android entry point. One `@PluginMethod` per API method: checks options, starts the work, resolves or rejects the call with an error code.                                   |
 | `android/.../OcrEngine.java`                                          | Wraps the ML Kit Japanese recognizer (with a warm-up at app start) and builds the result JSON.                                                                               |
 | `android/.../ReadingOrder.java`                                       | Reading order, paragraphs, furigana detection and pairing, regions. Plain Java, unit tested.                                                                                 |
-| `android/.../LiveCameraController.java`                               | CameraX: preview behind the WebView, Full HD frame analysis at the interval, freeze and full-resolution capture, torch, zoom, tap to focus.                                  |
+| `android/.../LiveCameraController.java`                               | CameraX: preview behind the WebView, Full HD frame analysis at the interval, full-resolution capture, torch, zoom, tap to focus.                                             |
 | `src/live-stabilizer.ts`                                              | Smooths live results over frames (follows paragraphs, hysteresis for new readings, dead band), `trackId`. Tests: `npm test`.                                                 |
 | `android/.../ViewMapper.java`                                         | Converts camera image pixels to CSS pixels of the WebView (`viewBoundingBox`).                                                                                               |
 | `android/.../RegionSelector.java`                                     | The full-screen rotate-and-frame dialog (`selectRegion: true`). Texts in `res/values*/strings.xml`.                                                                          |
@@ -814,9 +814,10 @@ reaches every `addListener` callback. Images travel as paths (`file://`, `conten
   page. Frames (about 1280×720) go to ML Kit at most every `intervalMs`; a frame is skipped while the previous
   one is still being processed. Each result is put in reading order, converted to JSON
   with `ViewMapper` positions and sent as `textRecognized`.
-- **Capture:** the current preview picture is shown frozen on top of the preview, a full-resolution photo is
-  taken, turned upright, optionally saved to `cache/japanese-ocr/`, recognized and returned. Frames are not
-  analyzed until `resumeLiveRecognition()`.
+- **Capture:** recognition pauses and a full-resolution photo is taken, turned upright, optionally saved to
+  `cache/japanese-ocr/`, recognized and returned. Frames are not analyzed until `resumeLiveRecognition()`. The
+  preview keeps running: a frozen picture as a native view behind the WebView left the page's transparent areas
+  black on Samsung devices.
 - **Still images:** `recognizeFromGallery` opens the system photo picker; `recognizeImage` opens a path or decodes
   base64. On a worker thread the image is decoded; with `selectRegion` the `RegionSelector` dialog returns the
   rotated image and the frames. Then the same recognition path as capture runs, limited to the regions.
